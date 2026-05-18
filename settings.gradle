@@ -1,0 +1,20 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'aegis'
+
+include 'backend-java:common-lib'
+include 'backend-java:api-gateway'
+include 'backend-java:telemetry-service'
+include 'backend-java:workflow-runtime'

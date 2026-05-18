@@ -1,0 +1,48 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+      memory:
+      filesystem:
+      network:
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 256
+
+  resource:
+    attributes:
+      - key: service.namespace
+        value: aegis-local
+        action: upsert
+
+exporters:
+  otlphttp/aegis:
+    endpoint: http://telemetry-service:8081
+
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, hostmetrics]
+      processors: [resource, batch]
+      exporters: [otlphttp/aegis, debug]
+    logs:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [otlphttp/aegis, debug]
+    traces:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [otlphttp/aegis, debug]

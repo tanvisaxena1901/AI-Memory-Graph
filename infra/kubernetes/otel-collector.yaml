@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegis-otel-collector-config
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 5s
+        send_batch_size: 256
+      resource:
+        attributes:
+          - key: service.namespace
+            value: aegis-kubernetes
+            action: upsert
+    exporters:
+      otlphttp/aegis:
+        endpoint: http://aegis-telemetry-service:8081
+      debug:
+        verbosity: basic
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [resource, batch]
+          exporters: [otlphttp/aegis, debug]
+        logs:
+          receivers: [otlp]
+          processors: [resource, batch]
+          exporters: [otlphttp/aegis, debug]
+        traces:
+          receivers: [otlp]
+          processors: [resource, batch]
+          exporters: [otlphttp/aegis, debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aegis-otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aegis-otel-collector
+  template:
+    metadata:
+      labels:
+        app: aegis-otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.114.0
+          args:
+            - --config=/etc/otelcol-contrib/config.yaml
+          ports:
+            - containerPort: 4317
+            - containerPort: 4318
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol-contrib
+      volumes:
+        - name: config
+          configMap:
+            name: aegis-otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aegis-otel-collector
+spec:
+  selector:
+    app: aegis-otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
