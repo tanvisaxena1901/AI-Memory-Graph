@@ -23,17 +23,76 @@ Stores metadata in PostgreSQL, then indexes semantic memory in the AI engine.
 
 ## Search Incident Memory
 
-`POST /api/v1/semantic-search`
+`POST /api/v1/memory/search`
 
 ```json
 {
-  "query": "Redis latency after deployment",
+  "query": "payment timeout after deployment",
+  "tenantId": "tenant-1",
+  "teamId": "payments",
+  "requestedBy": "operator-1",
+  "role": "responder",
   "service": "payment-service",
-  "limit": 5
+  "severity": "HIGH",
+  "limit": 5,
+  "telemetry": {
+    "redis_latency_ms": 900,
+    "error_rate": 0.2
+  },
+  "memoryTypes": ["episodic", "semantic", "procedural"]
 }
 ```
 
-Returns semantically similar incidents from OpenSearch vector search.
+Returns ranked incident memory from OpenSearch vector search or the in-memory fallback.
+Ranking combines semantic similarity, recency, service match, severity match, telemetry
+signal overlap, remediation success, and operator feedback.
+
+The legacy `POST /api/v1/semantic-search` endpoint is still available for basic semantic
+retrieval.
+
+Example result fields:
+
+```json
+{
+  "incidentId": "INC-BENCH-REDIS-POOL",
+  "service": "payment-service",
+  "severity": "HIGH",
+  "summary": "Payment requests timed out after deployment because Redis connection pool exhausted.",
+  "score": 0.89,
+  "similarityScore": 0.76,
+  "rankScore": 0.89,
+  "memoryType": "episodic",
+  "memorySchemaVersion": "v1",
+  "embeddingModel": "sentence-transformers/all-MiniLM-L6-v2",
+  "embeddingVersion": "2026-05",
+  "ttlTier": "hot",
+  "qualityScore": 1.0,
+  "duplicateOf": null,
+  "cluster": "redis-saturation",
+  "runbookRef": "redis-pool-exhaustion.yaml",
+  "rootCause": "Redis pool exhaustion caused request timeouts after a payment-service deployment.",
+  "remediation": ["Increase Redis pool max connections after checking server capacity."],
+  "telemetrySignals": {
+    "latency_spike": 2100,
+    "error_rate": 0.22,
+    "redis_saturation": 920
+  },
+  "rankingSignals": {
+    "similarity": 0.76,
+    "recency": 0.84,
+    "service": 1.0,
+    "severity": 1.0,
+    "successful_fix_boost": 1.0,
+    "feedback": 0.5,
+    "telemetry": 1.0,
+    "quality": 1.0,
+    "ttl": 1.0
+  }
+}
+```
+
+Access is tenant-scoped for `viewer` and `responder`. `platform-admin` and `auditor`
+can query across tenants for platform operations and review workflows.
 
 ## Generate RCA
 
@@ -56,6 +115,115 @@ Returns:
 - likely root cause
 - evidence
 - remediation suggestions
+
+## Human Feedback Loop
+
+`POST /api/v1/memory/feedback`
+
+```json
+{
+  "incidentId": "INC-1001",
+  "tenantId": "tenant-1",
+  "actorId": "operator-1",
+  "helpful": true,
+  "correctRca": true,
+  "remediationWorked": true,
+  "actionTaken": "rolled back payment-service v2.3",
+  "notes": "Matched the Redis pool issue from the previous rollout."
+}
+```
+
+Feedback is retained by the AI engine and contributes to future memory ranking.
+
+## RCA Evaluation
+
+`POST /api/v1/rca/evaluate`
+
+```json
+{
+  "incidentId": "INC-1001",
+  "tenantId": "tenant-1",
+  "aiRootCause": "Redis saturation after deployment.",
+  "humanRootCause": "Redis connection pool exhaustion after payment deployment.",
+  "aiRemediation": ["Inspect Redis connection pool saturation."],
+  "humanRemediation": ["Increase Redis pool max connections and roll back retry amplification."],
+  "aiConfidence": 0.82,
+  "humanConfirmed": false
+}
+```
+
+Returns an accuracy-style report with root-cause match, remediation overlap, and overall
+accuracy score. If AI confidence and human outcome are supplied, it also returns a
+confidence calibration error.
+
+## Memory Operations
+
+Re-embed all stale memories after an embedding model/schema version change:
+
+```text
+POST /api/v1/memory/reembed
+```
+
+Generate a synthetic demo dataset across Redis saturation, OOMKilled, Kafka lag,
+database connection exhaustion, and probe failure families:
+
+```text
+POST /api/v1/memory/synthetic-dataset?count=60
+```
+
+Inspect retrieval quality:
+
+```text
+GET /api/v1/evaluation/retrieval?k=5
+```
+
+Returns precision@5, recall@5, MRR, and hit rate.
+
+## Audit And Traces
+
+```text
+GET /api/v1/audit/events
+GET /api/v1/rag/traces
+```
+
+Audit events track who searched memory, which incidents were retrieved, the recommendation,
+and follow-up action metadata. RAG traces expose the memories used in an RCA/search path and
+whether cold-start fallback sources were used.
+
+## Postmortems
+
+```text
+GET /api/v1/postmortems/{incidentId}?tenantId=tenant-1
+```
+
+Returns a draft with summary, timeline, impact, root cause, detection gap, remediation, and
+follow-ups.
+
+## Incident Similarity Benchmark
+
+`GET /api/v1/benchmarks/incident-similarity?k=3`
+
+Returns benchmark cases, top-k accuracy, recall@5, and average similarity score for the
+seed incident memory dataset.
+
+## Graph RCA Query
+
+`GET /api/v1/graph/incidents?service=payment-service&rootCause=Redis%20saturation`
+
+Uses the Neo4j relationship model:
+
+```text
+Service -> Deployment -> Incident -> RootCause -> Remediation
+```
+
+Graph summary questions:
+
+```text
+GET /api/v1/graph/insights?tenantId=tenant-1
+```
+
+Returns services that repeatedly fail after deployments, recurring root causes, and
+remediations that worked most often.
 
 ## Service Ports
 

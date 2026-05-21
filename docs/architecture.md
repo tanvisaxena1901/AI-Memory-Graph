@@ -31,9 +31,13 @@ Telemetry Service
 2. Java persists normalized incident metadata in PostgreSQL.
 3. Java asynchronously calls the Python AI engine.
 4. Python creates an embedding from summary, logs, telemetry, and deployment metadata.
-5. Python indexes the incident and vector in OpenSearch.
-6. Python upserts service, deployment, and incident relationships in Neo4j.
-7. Semantic search and RCA endpoints retrieve related incidents and generate analysis.
+5. Python normalizes telemetry into incident-memory signals such as latency spike, error rate, restart count, CPU throttling, memory pressure, Kafka lag, DB connection usage, and Redis saturation.
+6. Python redacts secrets/PII from logs before storage.
+7. Python stamps each memory with schema version, embedding model, embedding version, tenant/team ownership, TTL tier, quality score, duplicate link, and incident cluster.
+8. Python indexes episodic incident memory in OpenSearch alongside semantic failure patterns and procedural runbooks.
+9. Python upserts service, deployment, incident, root-cause, and remediation relationships in Neo4j.
+10. Memory search and RCA endpoints retrieve related memory and generate analysis.
+11. Operator feedback and human-confirmed RCA reports update future ranking, calibration, audit, and evaluation metrics.
 
 ## Telemetry Flow
 
@@ -42,19 +46,83 @@ Telemetry Service
 3. The Collector batches and enriches telemetry with resource attributes.
 4. The Collector exports OTLP HTTP batches to `telemetry-service` at `/v1/metrics`, `/v1/logs`, and `/v1/traces`.
 5. AEGIS records batch metadata and exposes recent telemetry/stats APIs.
-6. Later phases normalize OTLP payloads into anomaly signals, graph relationships, and incident memory.
+6. Incident ingestion and RCA requests normalize telemetry values into anomaly signals used by memory search and ranking.
+
+## Memory Model
+
+```text
+episodic memory   -> past incidents with logs, telemetry, RCA, and outcomes
+semantic memory   -> known failure patterns such as Redis saturation or Kafka lag
+procedural memory -> runbooks and remediation steps
+```
+
+Ranking is a weighted blend of semantic similarity, recency, service match, severity match,
+telemetry-signal overlap, successful remediation, memory quality, TTL tier, and human feedback.
+
+Every memory stores:
+
+```text
+memorySchemaVersion=v1
+embeddingModel=sentence-transformers/all-MiniLM-L6-v2
+embeddingVersion=2026-05
+ttlTier=hot|warm|archived
+qualityScore=0.0..1.0
+tenantId/teamId/serviceOwner
+duplicateOf
+cluster
+runbookRef
+```
+
+When the embedding model or schema changes, `POST /api/v1/memory/reembed` refreshes stored
+memory embeddings and version metadata.
+
+## Governance
+
+Tenant-scoped roles (`viewer`, `responder`) only retrieve memory from their tenant and optional
+team scope. Platform roles (`platform-admin`, `auditor`) can inspect across tenants for platform
+operations and review workflows.
+
+Before logs are embedded or stored, the memory layer redacts API keys, tokens, JWTs, passwords,
+emails, and account/card-like numbers.
+
+Audit and RAG trace records make retrieval explainable:
+
+```text
+who searched -> query -> retrieved memories -> recommendation -> action taken
+```
 
 ## Domain Graph
 
 ```text
 (Service)-[:EXPERIENCED]->(Incident)
 (Deployment)-[:PRECEDED]->(Incident)
+(Incident)-[:CAUSED_BY]->(RootCause)
+(Incident)-[:MITIGATED_BY]->(Remediation)
 ```
 
-Future phases will extend this into:
+This supports graph RCA questions such as:
 
 ```text
-Deployment -> MemorySpike -> OOMKilled -> ConsumerLag -> ApiTimeout
+Show all incidents caused by Redis saturation in payment services.
+Service -> Deployment -> Incident -> RootCause -> Remediation
+```
+
+## Aegis Integration
+
+```text
+Aegis detects Kubernetes issue
+        |
+        v
+Aegis collects pod logs, events, rollout status, and telemetry
+        |
+        v
+AI-Memory-Graph POST /api/v1/memory/search
+        |
+        v
+LangGraph/RCA workflow combines current evidence with retrieved memory
+        |
+        v
+Aegis displays RCA, remediation plan, and feedback controls
 ```
 
 ## Engineering Properties

@@ -10,8 +10,21 @@ This repository implements the Phase 1 MVP:
 - PostgreSQL incident metadata persistence
 - Python embedding pipeline with `sentence-transformers`
 - OpenSearch vector indexing and semantic retrieval
+- incident similarity benchmark with top-k accuracy, recall@5, and similarity score
+- explicit AI memory types: episodic incidents, semantic failure patterns, and procedural runbooks
+- memory ranking by semantic similarity, recency, service, severity, remediation success, telemetry match, and human feedback
+- memory schema and embedding model versioning for explainable retrieval after model changes
+- re-embedding jobs for model/schema upgrades
+- hot/warm/archived memory TTL tiers and memory quality scoring
+- PII/secret redaction before logs are stored
+- tenant/team/service-owner isolation and role-aware retrieval
+- duplicate incident detection and incident-family clustering
+- operator feedback capture for helpfulness, RCA correctness, and remediation outcome
+- RCA evaluation reports comparing AI RCA against human-confirmed RCA
+- audit trail, RAG trace viewer data, and postmortem draft generation
+- synthetic incident dataset generation and retrieval evaluation with precision@5, recall@5, MRR, and hit rate
 - Neo4j operational graph writes
-- OpenTelemetry Collector ingestion for metrics, logs, and traces
+- OpenTelemetry Collector ingestion for metrics, logs, and traces with normalized incident telemetry signals
 - basic AI RCA generation
 - Dockerized local infrastructure
 - React dashboard shell
@@ -90,9 +103,20 @@ curl -X POST http://localhost:8080/api/v1/incidents \
 Semantic retrieval:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/semantic-search \
+curl -X POST http://localhost:8080/api/v1/memory/search \
   -H 'Content-Type: application/json' \
-  -d '{"query":"Redis latency after deployment","limit":5}'
+  -d '{
+    "query":"payment timeout after deployment",
+    "service":"payment-service",
+    "tenantId":"tenant-1",
+    "teamId":"payments",
+    "requestedBy":"operator-1",
+    "role":"responder",
+    "severity":"HIGH",
+    "limit":5,
+    "telemetry":{"redis_latency_ms":900,"error_rate":0.2},
+    "memoryTypes":["episodic","semantic","procedural"]
+  }'
 ```
 
 RCA:
@@ -106,6 +130,58 @@ curl -X POST http://localhost:8080/api/v1/rca \
     "logs":["redis timeout after 500ms"],
     "telemetry":{"redis_latency_ms":820}
   }'
+```
+
+Operator feedback:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/memory/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "incidentId":"INC-1001",
+    "tenantId":"tenant-1",
+    "actorId":"operator-1",
+    "helpful":true,
+    "correctRca":true,
+    "remediationWorked":true,
+    "actionTaken":"rolled back payment-service v2.3"
+  }'
+```
+
+Incident similarity benchmark:
+
+```bash
+curl http://localhost:8080/api/v1/benchmarks/incident-similarity
+```
+
+Graph RCA query:
+
+```bash
+curl 'http://localhost:8080/api/v1/graph/incidents?service=payment-service&rootCause=Redis%20saturation'
+```
+
+Operational AI-infra endpoints:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/memory/reembed
+curl -X POST 'http://localhost:8080/api/v1/memory/synthetic-dataset?count=60'
+curl http://localhost:8080/api/v1/evaluation/retrieval
+curl http://localhost:8080/api/v1/audit/events
+curl http://localhost:8080/api/v1/rag/traces
+curl http://localhost:8080/api/v1/postmortems/INC-1001?tenantId=tenant-1
+curl http://localhost:8080/api/v1/graph/insights?tenantId=tenant-1
+```
+
+## Platform Integration
+
+AEGIS can call AI-Memory-Graph before generating an RCA:
+
+```text
+Aegis detects a Kubernetes issue
+  -> collects pod logs, events, rollout status, and telemetry
+  -> POST /api/v1/memory/search for similar historical incidents
+  -> combines current evidence and retrieved memory in the RCA workflow
+  -> shows root cause, evidence, and remediation with feedback controls
 ```
 
 ## Example Telemetry

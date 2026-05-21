@@ -36,6 +36,26 @@ POST http://localhost:8081/v1/traces
 
 These endpoints accept OTLP HTTP payloads from the Collector and record batch metadata. Full OTLP protobuf decoding into service-level metric points is the next implementation step.
 
+## Incident Memory Normalization
+
+When telemetry is attached to an incident or RCA request, the AI engine normalizes common
+OpenTelemetry-style fields into memory-ranking signals:
+
+| Signal | Example fields |
+| --- | --- |
+| `latency_spike` | `p95_latency_ms`, `latency_ms`, `http_server_duration_p95_ms` |
+| `error_rate` | `error_rate`, `error_rate_pct` |
+| `restart_count` | `restart_count`, `pod_restart_count` |
+| `cpu_throttling` | `cpu_throttling_ratio`, `container_cpu_cfs_throttled_ratio` |
+| `memory_pressure` | `memory_working_set_ratio`, `container_memory_usage_ratio` |
+| `kafka_lag` | `kafka_lag`, `consumer_lag` |
+| `db_connection_usage` | `db_connections_used` / `db_connections_max` |
+| `redis_saturation` | `redis_latency_ms` |
+
+These signals make memories telemetry-rich rather than plain text only. Memory search uses
+signal overlap as one ranking feature alongside vector similarity, service, severity, recency,
+remediation success, and human feedback.
+
 ## Normalized Telemetry API
 
 Dashboard and development clients can post normalized events:

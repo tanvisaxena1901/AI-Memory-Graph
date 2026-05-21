@@ -7,6 +7,8 @@ public record RcaResponse(
         String summary,
         String likelyRootCause,
         List<String> evidence,
-        List<String> remediation
+        List<String> remediation,
+        double confidence,
+        String traceId
 ) {
 }

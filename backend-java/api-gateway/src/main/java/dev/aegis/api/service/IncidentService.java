@@ -6,6 +6,8 @@ import dev.aegis.common.model.IncidentDto;
 import dev.aegis.common.model.IncidentIngestRequest;
 import dev.aegis.common.model.IncidentSeverity;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,11 +30,20 @@ public class IncidentService {
     public Mono<IncidentDto> ingest(IncidentIngestRequest request) {
         IncidentEntity entity = new IncidentEntity();
         entity.setIncidentId(resolveIncidentId(request.incidentId()));
+        entity.setTenantId(resolveDefault(request.tenantId(), "default"));
+        entity.setTeamId(request.teamId());
+        entity.setServiceOwner(request.serviceOwner());
         entity.setService(required(request.service(), "service"));
         entity.setSeverity(request.severity() == null ? IncidentSeverity.MEDIUM : request.severity());
         entity.setSummary(required(request.summary(), "summary"));
         entity.setDeploymentVersion(request.deploymentVersion());
         entity.setTimestamp(request.timestamp() == null ? Instant.now() : request.timestamp());
+        entity.setRootCause(request.rootCause());
+        entity.setRemediation(encodeRemediation(request.remediation()));
+        entity.setSuccessfulRemediation(request.successfulRemediation());
+        entity.setAiConfidence(request.aiConfidence());
+        entity.setHumanConfirmed(request.humanConfirmed());
+        entity.setRunbookRef(request.runbookRef());
 
         return repository.save(entity)
                 .map(this::toDto)
@@ -54,11 +65,20 @@ public class IncidentService {
     private IncidentDto toDto(IncidentEntity entity) {
         return new IncidentDto(
                 entity.getIncidentId(),
+                entity.getTenantId(),
+                entity.getTeamId(),
+                entity.getServiceOwner(),
                 entity.getService(),
                 entity.getSeverity(),
                 entity.getSummary(),
                 entity.getDeploymentVersion(),
-                entity.getTimestamp());
+                entity.getTimestamp(),
+                entity.getRootCause(),
+                decodeRemediation(entity.getRemediation()),
+                entity.getSuccessfulRemediation(),
+                entity.getAiConfidence(),
+                entity.getHumanConfirmed(),
+                entity.getRunbookRef());
     }
 
     private static String resolveIncidentId(String incidentId) {
@@ -73,5 +93,25 @@ public class IncidentService {
             throw new IllegalArgumentException(field + " is required");
         }
         return value;
+    }
+
+    private static String resolveDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String encodeRemediation(List<String> remediation) {
+        if (remediation == null || remediation.isEmpty()) {
+            return null;
+        }
+        return String.join("\n", remediation);
+    }
+
+    private static List<String> decodeRemediation(String remediation) {
+        if (remediation == null || remediation.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(remediation.split("\\R"))
+                .filter(value -> !value.isBlank())
+                .toList();
     }
 }

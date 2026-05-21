@@ -6,7 +6,9 @@ class Settings(BaseSettings):
 
     app_name: str = "aegis-ai-engine"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_version: str = "2026-05"
     embedding_dimension: int = 384
+    memory_schema_version: str = "v1"
 
     opensearch_url: str = "http://localhost:9200"
     opensearch_user: str | None = None

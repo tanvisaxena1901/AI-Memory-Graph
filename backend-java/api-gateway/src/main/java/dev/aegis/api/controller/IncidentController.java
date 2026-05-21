@@ -2,12 +2,17 @@ package dev.aegis.api.controller;
 
 import dev.aegis.api.service.AiEngineClient;
 import dev.aegis.api.service.IncidentService;
+import dev.aegis.common.model.BenchmarkReport;
 import dev.aegis.common.model.IncidentDto;
 import dev.aegis.common.model.IncidentIngestRequest;
+import dev.aegis.common.model.MemoryFeedbackRequest;
+import dev.aegis.common.model.RcaEvaluationReport;
+import dev.aegis.common.model.RcaEvaluationRequest;
 import dev.aegis.common.model.RcaRequest;
 import dev.aegis.common.model.RcaResponse;
 import dev.aegis.common.model.SemanticSearchRequest;
 import dev.aegis.common.model.SimilarIncident;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -52,8 +57,76 @@ public class IncidentController {
         return aiEngineClient.search(request);
     }
 
+    @PostMapping("/memory/search")
+    public Flux<SimilarIncident> memorySearch(@RequestBody SemanticSearchRequest request) {
+        return aiEngineClient.searchMemory(request);
+    }
+
+    @PostMapping("/memory/feedback")
+    public Mono<Map> memoryFeedback(@RequestBody MemoryFeedbackRequest request) {
+        return aiEngineClient.recordFeedback(request);
+    }
+
     @PostMapping("/rca")
     public Mono<RcaResponse> rca(@RequestBody RcaRequest request) {
         return aiEngineClient.generateRca(request);
+    }
+
+    @PostMapping("/rca/evaluate")
+    public Mono<RcaEvaluationReport> evaluateRca(@RequestBody RcaEvaluationRequest request) {
+        return aiEngineClient.evaluateRca(request);
+    }
+
+    @GetMapping("/benchmarks/incident-similarity")
+    public Mono<BenchmarkReport> incidentSimilarityBenchmark(
+            @RequestParam(defaultValue = "3") int k
+    ) {
+        return aiEngineClient.incidentSimilarityBenchmark(k);
+    }
+
+    @GetMapping("/graph/incidents")
+    public Flux<Map> graphIncidents(
+            @RequestParam(required = false) String service,
+            @RequestParam String rootCause
+    ) {
+        return aiEngineClient.graphIncidents(service, rootCause);
+    }
+
+    @GetMapping("/graph/insights")
+    public Mono<Map> graphInsights(@RequestParam(defaultValue = "default") String tenantId) {
+        return aiEngineClient.graphInsights(tenantId);
+    }
+
+    @PostMapping("/memory/reembed")
+    public Mono<Map> reembedMemory() {
+        return aiEngineClient.reembedMemory();
+    }
+
+    @PostMapping("/memory/synthetic-dataset")
+    public Mono<Map> syntheticDataset(@RequestParam(defaultValue = "60") int count) {
+        return aiEngineClient.syntheticDataset(count);
+    }
+
+    @GetMapping("/evaluation/retrieval")
+    public Mono<Map> retrievalEvaluation(@RequestParam(defaultValue = "5") int k) {
+        return aiEngineClient.retrievalEvaluation(k);
+    }
+
+    @GetMapping("/audit/events")
+    public Flux<Map> auditEvents() {
+        return aiEngineClient.auditEvents();
+    }
+
+    @GetMapping("/rag/traces")
+    public Flux<Map> ragTraces() {
+        return aiEngineClient.ragTraces();
+    }
+
+    @GetMapping("/postmortems/{incidentId}")
+    public Mono<Map> postmortem(
+            @PathVariable String incidentId,
+            @RequestParam(defaultValue = "default") String tenantId
+    ) {
+        return aiEngineClient.postmortem(incidentId, tenantId);
     }
 }

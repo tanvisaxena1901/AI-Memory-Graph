@@ -26,6 +26,15 @@ class GraphRepository:
             MERGE (dep:Deployment {service: $service, version: $deploymentVersion})
             MERGE (dep)-[:PRECEDED]->(inc)
         )
+        WITH inc
+        FOREACH (_ IN CASE WHEN $rootCause IS NULL THEN [] ELSE [1] END |
+            MERGE (cause:RootCause {name: $rootCause})
+            MERGE (inc)-[:CAUSED_BY]->(cause)
+        )
+        WITH inc
+        UNWIND $remediation AS step
+            MERGE (rem:Remediation {step: step})
+            MERGE (inc)-[:MITIGATED_BY]->(rem)
         """
         try:
             with self._driver.session() as session:
@@ -37,9 +46,35 @@ class GraphRepository:
                     severity=incident.severity,
                     timestamp=incident.timestamp.isoformat(),
                     deploymentVersion=incident.deploymentVersion,
+                    rootCause=incident.rootCause,
+                    remediation=incident.remediation,
                 )
         except Exception as exc:
             log.warning("neo4j_write_failed incidentId=%s reason=%s", incident.incidentId, exc)
+
+    def find_incidents_by_cause(self, service: str | None, root_cause: str) -> list[dict[str, str]]:
+        if self._driver is None:
+            return []
+        query = """
+        MATCH (svc:Service)-[:EXPERIENCED]->(inc:Incident)-[:CAUSED_BY]->(cause:RootCause)
+        WHERE toLower(cause.name) CONTAINS toLower($rootCause)
+          AND ($service IS NULL OR svc.name = $service)
+        OPTIONAL MATCH (inc)-[:MITIGATED_BY]->(rem:Remediation)
+        RETURN inc.incidentId AS incidentId,
+               svc.name AS service,
+               inc.severity AS severity,
+               inc.summary AS summary,
+               cause.name AS rootCause,
+               collect(rem.step) AS remediation
+        ORDER BY inc.timestamp DESC
+        LIMIT 25
+        """
+        try:
+            with self._driver.session() as session:
+                return [dict(record) for record in session.run(query, service=service, rootCause=root_cause)]
+        except Exception as exc:
+            log.warning("neo4j_query_failed rootCause=%s reason=%s", root_cause, exc)
+            return []
 
     def _build_driver(self):
         try:
