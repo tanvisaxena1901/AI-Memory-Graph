@@ -202,6 +202,7 @@ class RagTrace(BaseModel):
     usedMemories: list[SimilarIncident]
     coldStart: bool
     fallbackSources: list[str] = Field(default_factory=list)
+    events: list["ReasoningEvent"] = Field(default_factory=list)
 
 
 class PostmortemDraft(BaseModel):
@@ -219,3 +220,70 @@ class GraphInsightReport(BaseModel):
     repeatedDeploymentFailures: list[dict[str, Any]]
     recurringRootCauses: list[dict[str, Any]]
     effectiveRemediations: list[dict[str, Any]]
+
+
+class TelemetryCausalityRequest(BaseModel):
+    incidentId: str | None = None
+    tenantId: str | None = "default"
+    service: str
+    deploymentVersion: str | None = None
+    telemetry: dict[str, Any] = Field(default_factory=dict)
+    logs: list[str] = Field(default_factory=list)
+    events: list[str] = Field(default_factory=list)
+    timestamp: datetime | None = None
+
+
+class CausalityNode(BaseModel):
+    id: str
+    label: str
+    kind: str
+    service: str | None = None
+    severity: str | None = None
+    detail: str
+    score: float = 0.0
+
+
+class CausalityEdge(BaseModel):
+    source: str
+    target: str
+    relationship: str
+    weight: float = 1.0
+    evidence: list[str] = Field(default_factory=list)
+
+
+class CausalityGraph(BaseModel):
+    incidentId: str | None = None
+    tenantId: str = "default"
+    nodes: list[CausalityNode]
+    edges: list[CausalityEdge]
+    blastRadius: list[str] = Field(default_factory=list)
+    recurringPatterns: list[str] = Field(default_factory=list)
+    reasoningSummary: str
+
+
+class GraphTraversalRequest(BaseModel):
+    startNodeId: str
+    tenantId: str = "default"
+    maxDepth: int = 3
+    direction: str = "both"
+
+
+class ReasoningEvent(BaseModel):
+    eventId: str
+    traceId: str
+    timestamp: datetime
+    step: str
+    incidentId: str | None = None
+    service: str | None = None
+    detail: str
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    outputs: dict[str, Any] = Field(default_factory=dict)
+    durationMs: int = 0
+    parentEventId: str | None = None
+
+
+class ReasoningTraceReplay(BaseModel):
+    traceId: str
+    events: list[ReasoningEvent]
+    workflowPath: list[str]
+    summary: str

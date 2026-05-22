@@ -3,15 +3,19 @@ package dev.aegis.api.controller;
 import dev.aegis.api.service.AiEngineClient;
 import dev.aegis.api.service.IncidentService;
 import dev.aegis.common.model.BenchmarkReport;
+import dev.aegis.common.model.CausalityGraph;
+import dev.aegis.common.model.GraphTraversalRequest;
 import dev.aegis.common.model.IncidentDto;
 import dev.aegis.common.model.IncidentIngestRequest;
 import dev.aegis.common.model.MemoryFeedbackRequest;
+import dev.aegis.common.model.ReasoningTraceReplay;
 import dev.aegis.common.model.RcaEvaluationReport;
 import dev.aegis.common.model.RcaEvaluationRequest;
 import dev.aegis.common.model.RcaRequest;
 import dev.aegis.common.model.RcaResponse;
 import dev.aegis.common.model.SemanticSearchRequest;
 import dev.aegis.common.model.SimilarIncident;
+import dev.aegis.common.model.TelemetryCausalityRequest;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -97,6 +101,23 @@ public class IncidentController {
         return aiEngineClient.graphInsights(tenantId);
     }
 
+    @PostMapping("/graph/causality")
+    public Mono<CausalityGraph> buildCausalityGraph(@RequestBody TelemetryCausalityRequest request) {
+        return aiEngineClient.buildCausalityGraph(request);
+    }
+
+    @GetMapping("/graph/causality")
+    public Mono<CausalityGraph> latestCausalityGraph(
+            @RequestParam(required = false) String incidentId
+    ) {
+        return aiEngineClient.latestCausalityGraph(incidentId);
+    }
+
+    @PostMapping("/graph/traverse")
+    public Mono<CausalityGraph> traverseGraph(@RequestBody GraphTraversalRequest request) {
+        return aiEngineClient.traverseGraph(request);
+    }
+
     @PostMapping("/memory/reembed")
     public Mono<Map> reembedMemory() {
         return aiEngineClient.reembedMemory();
@@ -120,6 +141,11 @@ public class IncidentController {
     @GetMapping("/rag/traces")
     public Flux<Map> ragTraces() {
         return aiEngineClient.ragTraces();
+    }
+
+    @GetMapping("/reasoning/traces/{traceId}/replay")
+    public Mono<ReasoningTraceReplay> replayReasoningTrace(@PathVariable String traceId) {
+        return aiEngineClient.replayReasoningTrace(traceId);
     }
 
     @GetMapping("/postmortems/{incidentId}")

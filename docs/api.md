@@ -225,6 +225,66 @@ GET /api/v1/graph/insights?tenantId=tenant-1
 Returns services that repeatedly fail after deployments, recurring root causes, and
 remediations that worked most often.
 
+## Telemetry Causality Graph
+
+`POST /api/v1/graph/causality`
+
+Builds a graph from deployment context, telemetry signals, logs, and events. The AI engine writes
+the graph to Neo4j when available and returns an in-memory fallback graph during local development.
+
+```json
+{
+  "incidentId": "INC-1001",
+  "tenantId": "default",
+  "service": "payment-service",
+  "deploymentVersion": "v2.3",
+  "telemetry": {
+    "redis_latency_ms": 900,
+    "error_rate": 0.18,
+    "p95_latency_ms": 1800
+  },
+  "logs": ["redis timeout after 500ms", "connection pool exhausted"],
+  "events": ["Deploy v2.3 completed"]
+}
+```
+
+`GET /api/v1/graph/causality?incidentId=INC-1001`
+
+Returns the latest or requested causality graph.
+
+`POST /api/v1/graph/traverse`
+
+```json
+{
+  "startNodeId": "service:payment-service",
+  "tenantId": "default",
+  "maxDepth": 3,
+  "direction": "both"
+}
+```
+
+Returns the traversed subgraph, blast radius candidates, and recurring patterns.
+
+## Reasoning Trace Replay
+
+`GET /api/v1/reasoning/traces/{traceId}/replay`
+
+Replays AI cognition events emitted during memory retrieval, graph causality building, and RCA
+generation:
+
+```json
+{
+  "traceId": "trace-abc123",
+  "workflowPath": ["QUERY_EMBEDDING", "MEMORY_RETRIEVAL", "GRAPH_CAUSALITY", "RCA_GENERATION"],
+  "events": [
+    {
+      "step": "MEMORY_RETRIEVAL",
+      "detail": "Retrieved and ranked operational memories from vector search."
+    }
+  ]
+}
+```
+
 ## Service Ports
 
 - API gateway: `8080`

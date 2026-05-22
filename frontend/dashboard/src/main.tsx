@@ -1,3 +1,4 @@
+import * as d3 from "d3";
 import React, { useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
@@ -27,7 +28,7 @@ import {
 import "./styles.css";
 
 type Severity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-type View = "metrics" | "incidents" | "memory" | "graph" | "workflows";
+type View = "metrics" | "incidents" | "memory" | "graph" | "workflows" | "reasoning";
 
 type Incident = {
   incidentId: string;
@@ -46,6 +47,8 @@ type RcaResult = {
   likelyRootCause: string;
   evidence: string[];
   remediation: string[];
+  confidence?: number;
+  traceId?: string;
 };
 
 type ChatMessage = {
@@ -56,6 +59,23 @@ type ChatMessage = {
 };
 
 type SearchResult = Incident & { score: number; reason: string };
+
+type RemoteMemory = {
+  incidentId: string;
+  service: string;
+  severity: Severity;
+  summary: string;
+  deploymentVersion?: string;
+  timestamp: string;
+  score: number;
+  similarityScore: number;
+  rankScore: number;
+  memoryType: string;
+  rootCause?: string;
+  remediation?: string[];
+  telemetrySignals?: Record<string, number | string>;
+  rankingSignals?: Record<string, number>;
+};
 
 type MetricSample = {
   id: string;
@@ -69,10 +89,52 @@ type MetricSample = {
 type GraphNode = {
   id: string;
   label: string;
-  kind: "deploy" | "metric" | "fault" | "incident" | "service";
+  kind: "deploy" | "deployment" | "metric" | "fault" | "incident" | "service" | "signal";
   x: number;
   y: number;
   detail: string;
+  service?: string;
+  severity?: string;
+  score?: number;
+};
+
+type CausalityEdge = {
+  source: string;
+  target: string;
+  relationship: string;
+  weight: number;
+  evidence: string[];
+};
+
+type CausalityGraphData = {
+  incidentId?: string;
+  tenantId: string;
+  nodes: Array<Omit<GraphNode, "x" | "y">>;
+  edges: CausalityEdge[];
+  blastRadius: string[];
+  recurringPatterns: string[];
+  reasoningSummary: string;
+};
+
+type ReasoningEvent = {
+  eventId: string;
+  traceId: string;
+  timestamp: string;
+  step: string;
+  incidentId?: string;
+  service?: string;
+  detail: string;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  durationMs: number;
+  parentEventId?: string;
+};
+
+type ReasoningReplay = {
+  traceId: string;
+  events: ReasoningEvent[];
+  workflowPath: string[];
+  summary: string;
 };
 
 const initialIncidents: Incident[] = [
@@ -154,6 +216,72 @@ const graphNodes: GraphNode[] = [
   }
 ];
 
+const initialCausalityGraph: CausalityGraphData = {
+  incidentId: "INC-1001",
+  tenantId: "default",
+  nodes: graphNodes.map(({ x: _x, y: _y, ...node }) => node),
+  edges: [
+    { source: "deploy", target: "service", relationship: "CHANGED", weight: 0.78, evidence: ["deploymentVersion=v2.3"] },
+    { source: "service", target: "metric", relationship: "SATURATED", weight: 0.88, evidence: ["redis_latency_ms=820"] },
+    { source: "metric", target: "fault", relationship: "PROPAGATED_TO", weight: 0.82, evidence: ["checkout API timeout"] },
+    { source: "fault", target: "incident", relationship: "CAUSED", weight: 0.9, evidence: ["error_rate=18%"] }
+  ],
+  blastRadius: ["payment-service", "checkout-api", "order-confirmation"],
+  recurringPatterns: ["redis-saturation", "api-degradation"],
+  reasoningSummary: "Deployment and Redis saturation signals propagated into API timeouts for INC-1001."
+};
+
+const initialReasoningReplay: ReasoningReplay = {
+  traceId: "trace-local-demo",
+  workflowPath: ["QUERY_EMBEDDING", "MEMORY_RETRIEVAL", "GRAPH_CAUSALITY", "RCA_GENERATION"],
+  summary: "Local replay shows how AEGIS combines memory retrieval, graph traversal, and RCA generation.",
+  events: [
+    {
+      eventId: "evt-local-1",
+      traceId: "trace-local-demo",
+      timestamp: new Date().toISOString(),
+      step: "QUERY_EMBEDDING",
+      detail: "Encoded the incident query using the configured embedding model.",
+      inputs: { query: "Redis latency after deployment" },
+      outputs: { embeddingModel: "sentence-transformers/all-MiniLM-L6-v2" },
+      durationMs: 12
+    },
+    {
+      eventId: "evt-local-2",
+      traceId: "trace-local-demo",
+      timestamp: new Date().toISOString(),
+      step: "MEMORY_RETRIEVAL",
+      detail: "Retrieved historical Redis pool exhaustion and runbook memories.",
+      inputs: { service: "payment-service" },
+      outputs: { retrievedIncidentIds: ["INC-BENCH-REDIS-POOL", "RUNBOOK-REDIS-POOL"] },
+      durationMs: 24,
+      parentEventId: "evt-local-1"
+    },
+    {
+      eventId: "evt-local-3",
+      traceId: "trace-local-demo",
+      timestamp: new Date().toISOString(),
+      step: "GRAPH_CAUSALITY",
+      detail: "Linked deployment, Redis saturation, and API timeout nodes.",
+      inputs: { telemetryKeys: ["redis_latency_ms", "error_rate"] },
+      outputs: { nodes: 5, edges: 4 },
+      durationMs: 18,
+      parentEventId: "evt-local-2"
+    },
+    {
+      eventId: "evt-local-4",
+      traceId: "trace-local-demo",
+      timestamp: new Date().toISOString(),
+      step: "RCA_GENERATION",
+      detail: "Generated RCA from retrieved memory and graph context.",
+      inputs: { incidentId: "INC-1001" },
+      outputs: { likelyRootCause: "Redis connection saturation after deployment." },
+      durationMs: 42,
+      parentEventId: "evt-local-3"
+    }
+  ]
+};
+
 const workflowSteps = [
   "Detect metric anomaly",
   "Collect logs",
@@ -193,6 +321,8 @@ function App() {
   const [rca, setRca] = useState<RcaResult>(() => buildLocalRca(initialIncidents[0], []));
   const [status, setStatus] = useState("Dashboard running in local memory mode");
   const [selectedGraphNode, setSelectedGraphNode] = useState(graphNodes[0]);
+  const [causalityGraph, setCausalityGraph] = useState<CausalityGraphData>(initialCausalityGraph);
+  const [reasoningReplay, setReasoningReplay] = useState<ReasoningReplay>(initialReasoningReplay);
   const [workflowRunning, setWorkflowRunning] = useState(false);
   const [workflowIndex, setWorkflowIndex] = useState(0);
   const [chatInput, setChatInput] = useState("What is the most likely root cause?");
@@ -231,9 +361,9 @@ function App() {
         tone: "red"
       },
       { label: "Metric samples", value: metricSamples.length.toString(), icon: <BarChart3 size={18} />, tone: "blue" },
-      { label: "Graph edges", value: "9", icon: <GitBranch size={18} />, tone: "amber" }
+      { label: "Graph edges", value: causalityGraph.edges.length.toString(), icon: <GitBranch size={18} />, tone: "amber" }
     ],
-    [incidents, metricSamples.length, services.length]
+    [causalityGraph.edges.length, incidents, metricSamples.length, services.length]
   );
 
   useEffect(() => {
@@ -272,15 +402,43 @@ function App() {
     setStatus(`${incident.incidentId} selected for investigation`);
   }
 
-  function runSearch() {
-    const ranked = incidents
-      .map((incident) => scoreIncident(incident, query))
-      .filter((result) => result.score > 0)
-      .sort((a, b) => b.score - a.score);
-    const finalResults = ranked.length > 0 ? ranked : incidents.map((incident) => ({ ...incident, score: 0.42, reason: "fallback memory candidate" }));
-    setSearchResults(finalResults);
-    setActiveView("memory");
-    setStatus(`Semantic search returned ${finalResults.length} memory matches`);
+  async function runSearch() {
+    const selectedTelemetry = selectedIncident.telemetry;
+    try {
+      const response = await fetch("/api/v1/memory/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query,
+          tenantId: "default",
+          requestedBy: "dashboard",
+          role: "platform-admin",
+          service: serviceFilter === "all" ? selectedIncident.service : serviceFilter,
+          severity: selectedIncident.severity,
+          limit: 6,
+          telemetry: selectedTelemetry,
+          memoryTypes: ["episodic", "semantic", "procedural"]
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const remote = (await response.json()) as RemoteMemory[];
+      const mapped = remote.map(mapRemoteMemory);
+      setSearchResults(mapped);
+      setActiveView("memory");
+      setStatus(`Semantic vector retrieval returned ${mapped.length} memories`);
+      return;
+    } catch {
+      const ranked = incidents
+        .map((incident) => scoreIncident(incident, query))
+        .filter((result) => result.score > 0)
+        .sort((a, b) => b.score - a.score);
+      const finalResults = ranked.length > 0 ? ranked : incidents.map((incident) => ({ ...incident, score: 0.42, reason: "fallback memory candidate" }));
+      setSearchResults(finalResults);
+      setActiveView("memory");
+      setStatus(`Local semantic retrieval returned ${finalResults.length} memory matches`);
+    }
   }
 
   async function collectMetricSample(event?: React.FormEvent<HTMLFormElement>) {
@@ -352,6 +510,9 @@ function App() {
       }
       const remote = (await response.json()) as RcaResult;
       setRca(remote);
+      if (remote.traceId) {
+        await loadReasoningReplay(remote.traceId);
+      }
       setStatus(`RCA generated by AI engine for ${selectedIncident.incidentId}`);
     } catch {
       setRca(buildLocalRca(selectedIncident, searchResults));
@@ -362,6 +523,56 @@ function App() {
         incident.incidentId === selectedIncident.incidentId ? { ...incident, status: "RCA ready" } : incident
       )
     );
+  }
+
+  async function buildCausalityGraph() {
+    try {
+      const response = await fetch("/api/v1/graph/causality", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          incidentId: selectedIncident.incidentId,
+          tenantId: "default",
+          service: selectedIncident.service,
+          deploymentVersion: selectedIncident.deploymentVersion,
+          telemetry: selectedIncident.telemetry,
+          logs: selectedIncident.logs,
+          events: [
+            `${selectedIncident.deploymentVersion} active for ${selectedIncident.service}`,
+            `${selectedIncident.status} status`,
+            selectedIncident.summary
+          ],
+          timestamp: selectedIncident.timestamp
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const graph = normalizeCausalityGraph((await response.json()) as CausalityGraphData);
+      setCausalityGraph(graph);
+      setSelectedGraphNode(graph.nodes[0] ? { ...graph.nodes[0], x: 0, y: 0 } : graphNodes[0]);
+      setActiveView("graph");
+      setStatus(`Causality graph built for ${selectedIncident.incidentId}`);
+    } catch {
+      const local = buildLocalCausalityGraph(selectedIncident);
+      setCausalityGraph(local);
+      setSelectedGraphNode(local.nodes[0] ? { ...local.nodes[0], x: 0, y: 0 } : graphNodes[0]);
+      setActiveView("graph");
+      setStatus(`Local causality graph built for ${selectedIncident.incidentId}`);
+    }
+  }
+
+  async function loadReasoningReplay(traceId: string) {
+    try {
+      const response = await fetch(`/api/v1/reasoning/traces/${traceId}/replay`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      setReasoningReplay((await response.json()) as ReasoningReplay);
+      setActiveView("reasoning");
+    } catch {
+      setReasoningReplay(initialReasoningReplay);
+    }
   }
 
   async function askRcaAssistant(event?: React.FormEvent<HTMLFormElement>, suggestedQuestion?: string) {
@@ -457,6 +668,7 @@ function App() {
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill label={status} />
             <ActionButton icon={<Gauge size={16} />} label="Collect Metrics" onClick={() => setActiveView("metrics")} />
+            <ActionButton icon={<Network size={16} />} label="Build Graph" onClick={buildCausalityGraph} />
             <ActionButton icon={<Play size={16} />} label="Start Workflow" onClick={startWorkflow} />
           </div>
         </div>
@@ -475,6 +687,7 @@ function App() {
           <NavButton active={activeView === "memory"} icon={<Database size={16} />} label="Memory Search" onClick={() => setActiveView("memory")} />
           <NavButton active={activeView === "graph"} icon={<Network size={16} />} label="Graph" onClick={() => setActiveView("graph")} />
           <NavButton active={activeView === "workflows"} icon={<Layers3 size={16} />} label="Workflows" onClick={() => setActiveView("workflows")} />
+          <NavButton active={activeView === "reasoning"} icon={<Bot size={16} />} label="Reasoning" onClick={() => setActiveView("reasoning")} />
         </div>
       </section>
 
@@ -561,26 +774,21 @@ function App() {
           )}
 
           {activeView === "graph" && (
-            <Panel title="Operational Memory Graph" action={<ActionButton icon={<GitBranch size={16} />} label="Focus Incident" onClick={() => setSelectedGraphNode(graphNodes[4])} />}>
+            <Panel title="Telemetry Causality Graph" action={<ActionButton icon={<GitBranch size={16} />} label="Build Graph" onClick={buildCausalityGraph} />}>
               <div className="grid gap-4 p-4 lg:grid-cols-[1fr_240px]">
-                <svg viewBox="0 0 520 360" className="min-h-[320px] w-full rounded border border-slate-200 bg-white">
-                  <GraphEdge x1={92} y1={82} x2={250} y2={82} />
-                  <GraphEdge x1={250} y1={82} x2={250} y2={214} />
-                  <GraphEdge x1={250} y1={214} x2={415} y2={150} />
-                  <GraphEdge x1={250} y1={214} x2={415} y2={282} />
-                  {graphNodes.map((node) => (
-                    <GraphNodeView
-                      key={node.id}
-                      node={node}
-                      selected={node.id === selectedGraphNode.id}
-                      onSelect={() => setSelectedGraphNode(node)}
-                    />
-                  ))}
-                </svg>
+                <D3CausalityGraph
+                  graph={causalityGraph}
+                  selectedId={selectedGraphNode.id}
+                  onSelect={(node) => setSelectedGraphNode({ ...node, x: 0, y: 0 })}
+                />
                 <div className="rounded border border-slate-200 bg-slate-50 p-4">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{selectedGraphNode.kind}</div>
                   <div className="mt-2 text-lg font-semibold">{selectedGraphNode.label}</div>
                   <p className="mt-3 text-sm leading-6 text-slate-600">{selectedGraphNode.detail}</p>
+                  <div className="mt-4 grid gap-2 text-xs text-slate-600">
+                    <div className="rounded bg-white px-3 py-2">Blast radius: {causalityGraph.blastRadius.join(", ") || "none"}</div>
+                    <div className="rounded bg-white px-3 py-2">Patterns: {causalityGraph.recurringPatterns.join(", ") || "none"}</div>
+                  </div>
                   <button
                     onClick={generateRca}
                     className="mt-4 inline-flex h-10 items-center gap-2 rounded bg-graphite px-3 text-sm font-medium text-white transition hover:bg-slate-700"
@@ -589,6 +797,9 @@ function App() {
                     Generate RCA
                   </button>
                 </div>
+              </div>
+              <div className="border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
+                {causalityGraph.reasoningSummary}
               </div>
             </Panel>
           )}
@@ -606,6 +817,16 @@ function App() {
                 ))}
               </div>
             </Panel>
+          )}
+
+          {activeView === "reasoning" && (
+            <ReasoningReplayPanel
+              replay={reasoningReplay}
+              onReplay={() => {
+                const traceId = rca.traceId ?? reasoningReplay.traceId;
+                void loadReasoningReplay(traceId);
+              }}
+            />
           )}
         </div>
 
@@ -638,8 +859,10 @@ function App() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <ActionButton icon={<Sparkles size={16} />} label="Generate RCA" onClick={generateRca} />
+                <ActionButton icon={<Network size={16} />} label="Causality Graph" onClick={buildCausalityGraph} />
                 <ActionButton icon={<CheckCircle2 size={16} />} label="Acknowledge" onClick={acknowledgeIncident} />
                 <ActionButton icon={<Play size={16} />} label="Workflow" onClick={startWorkflow} />
+                <ActionButton icon={<Bot size={16} />} label="Trace Replay" onClick={() => setActiveView("reasoning")} />
               </div>
             </div>
           </Panel>
@@ -977,6 +1200,147 @@ function Input(props: { label: string; value: string; onChange: (value: string) 
   );
 }
 
+function D3CausalityGraph(props: {
+  graph: CausalityGraphData;
+  selectedId: string;
+  onSelect: (node: Omit<GraphNode, "x" | "y">) => void;
+}) {
+  const layout = useMemo(() => {
+    type LayoutNode = Omit<GraphNode, "x" | "y"> & d3.SimulationNodeDatum & { x: number; y: number };
+    type LayoutLink = Omit<CausalityEdge, "source" | "target"> &
+      d3.SimulationLinkDatum<LayoutNode> & {
+        source: string | LayoutNode;
+        target: string | LayoutNode;
+      };
+    const nodes = props.graph.nodes.map((node, index) => ({
+      ...node,
+      x: 120 + (index % 3) * 160,
+      y: 90 + Math.floor(index / 3) * 100
+    })) satisfies LayoutNode[];
+    const links = props.graph.edges.map((edge) => ({ ...edge })) satisfies LayoutLink[];
+    const simulation = d3
+      .forceSimulation(nodes)
+      .force(
+        "link",
+        d3.forceLink<LayoutNode, LayoutLink>(links)
+          .id((node) => node.id)
+          .distance(118)
+          .strength((edge) => Math.max(0.35, edge.weight))
+      )
+      .force("charge", d3.forceManyBody().strength(-420))
+      .force("center", d3.forceCenter(260, 180))
+      .force("collision", d3.forceCollide(46))
+      .stop();
+    for (let index = 0; index < 160; index += 1) {
+      simulation.tick();
+    }
+    return { nodes, links };
+  }, [props.graph]);
+
+  const nodeById = new Map(layout.nodes.map((node) => [node.id, node]));
+
+  return (
+    <svg viewBox="0 0 520 360" className="min-h-[320px] w-full rounded border border-slate-200 bg-white">
+      <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#64748b" />
+        </marker>
+      </defs>
+      {layout.links.map((edge) => {
+        const source = typeof edge.source === "string" ? nodeById.get(edge.source) : edge.source;
+        const target = typeof edge.target === "string" ? nodeById.get(edge.target) : edge.target;
+        if (!source || !target) {
+          return null;
+        }
+        return (
+          <g key={`${source.id}-${target.id}-${edge.relationship}`}>
+            <line
+              x1={source.x}
+              y1={source.y}
+              x2={target.x}
+              y2={target.y}
+              stroke="#94a3b8"
+              strokeWidth={Math.max(1.5, edge.weight * 3)}
+              markerEnd="url(#arrow)"
+            />
+            <text x={(source.x + target.x) / 2} y={(source.y + target.y) / 2 - 6} textAnchor="middle" className="fill-slate-500 text-[10px] font-medium">
+              {edge.relationship}
+            </text>
+          </g>
+        );
+      })}
+      {layout.nodes.map((node) => (
+        <GraphNodeView
+          key={node.id}
+          node={node}
+          selected={node.id === props.selectedId}
+          onSelect={() => props.onSelect(node)}
+        />
+      ))}
+    </svg>
+  );
+}
+
+function ReasoningReplayPanel(props: { replay: ReasoningReplay; onReplay: () => void }) {
+  const points = useMemo(() => {
+    const steps = props.replay.events.map((event) => event.step);
+    const x = d3.scalePoint<string>().domain(steps).range([70, 450]).padding(0.4);
+    return props.replay.events.map((event, index) => ({
+      event,
+      x: x(event.step) ?? 70 + index * 95,
+      y: 120 + (index % 2) * 70
+    }));
+  }, [props.replay.events]);
+
+  return (
+    <Panel title="AI Reasoning Trace Replay" action={<ActionButton icon={<Play size={16} />} label="Replay" onClick={props.onReplay} />}>
+      <div className="grid gap-4 p-4">
+        <div className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{props.replay.summary}</div>
+        <svg viewBox="0 0 520 250" className="min-h-[230px] w-full rounded border border-slate-200 bg-white">
+          {points.slice(1).map((point, index) => {
+            const previous = points[index];
+            return (
+              <line
+                key={`${previous.event.eventId}-${point.event.eventId}`}
+                x1={previous.x}
+                y1={previous.y}
+                x2={point.x}
+                y2={point.y}
+                stroke="#64748b"
+                strokeWidth="2"
+                strokeDasharray="5 5"
+              />
+            );
+          })}
+          {points.map((point, index) => (
+            <g key={point.event.eventId}>
+              <circle cx={point.x} cy={point.y} r="28" fill={index === points.length - 1 ? "#0f766e" : "#334155"} />
+              <text x={point.x} y={point.y + 4} textAnchor="middle" className="fill-white text-[12px] font-semibold">
+                {index + 1}
+              </text>
+              <text x={point.x} y={point.y + 45} textAnchor="middle" className="fill-slate-700 text-[11px] font-medium">
+                {point.event.step.replace(/_/g, " ")}
+              </text>
+            </g>
+          ))}
+        </svg>
+        <div className="grid gap-2">
+          {props.replay.events.map((event) => (
+            <div key={event.eventId} className="rounded border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-mono text-xs text-slate-500">{event.eventId}</div>
+                <div className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{event.durationMs}ms</div>
+              </div>
+              <div className="mt-1 text-sm font-semibold">{event.step.replace(/_/g, " ")}</div>
+              <p className="mt-1 text-sm leading-6 text-slate-600">{event.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 function GraphEdge(props: { x1: number; y1: number; x2: number; y2: number }) {
   return <line {...props} stroke="#94a3b8" strokeWidth="2" strokeDasharray="6 6" />;
 }
@@ -984,10 +1348,12 @@ function GraphEdge(props: { x1: number; y1: number; x2: number; y2: number }) {
 function GraphNodeView(props: { node: GraphNode; selected: boolean; onSelect: () => void }) {
   const fill = {
     deploy: "#0f766e",
+    deployment: "#0f766e",
     metric: "#eab308",
     fault: "#dc2626",
     incident: "#475569",
-    service: "#2563eb"
+    service: "#2563eb",
+    signal: "#9333ea"
   }[props.node.kind];
   return (
     <g onClick={props.onSelect} className="cursor-pointer">
@@ -998,6 +1364,149 @@ function GraphNodeView(props: { node: GraphNode; selected: boolean; onSelect: ()
       </text>
     </g>
   );
+}
+
+function mapRemoteMemory(memory: RemoteMemory): SearchResult {
+  const score = memory.rankScore || memory.score || memory.similarityScore || 0;
+  return {
+    incidentId: memory.incidentId,
+    service: memory.service,
+    severity: memory.severity,
+    summary: memory.summary,
+    deploymentVersion: memory.deploymentVersion ?? "memory",
+    timestamp: memory.timestamp,
+    logs: [
+      memory.rootCause ? `rootCause=${memory.rootCause}` : `${memory.memoryType} memory`,
+      ...Object.entries(memory.telemetrySignals ?? {}).map(([key, value]) => `${key}=${value}`)
+    ],
+    telemetry: memory.telemetrySignals ?? {},
+    status: "RCA ready",
+    score,
+    reason: `Vector ${(memory.similarityScore ?? score).toFixed(2)} | ${memory.memoryType} | ${Object.keys(memory.rankingSignals ?? {}).slice(0, 3).join(", ")}`
+  };
+}
+
+function normalizeCausalityGraph(graph: CausalityGraphData): CausalityGraphData {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => ({
+      id: node.id,
+      label: node.label,
+      kind: node.kind === "deployment" ? "deployment" : node.kind,
+      detail: node.detail,
+      score: node.score,
+      service: node.service,
+      severity: node.severity
+    })),
+    edges: graph.edges ?? [],
+    blastRadius: graph.blastRadius ?? [],
+    recurringPatterns: graph.recurringPatterns ?? [],
+    reasoningSummary: graph.reasoningSummary ?? "Causality graph ready."
+  };
+}
+
+function buildLocalCausalityGraph(incident: Incident): CausalityGraphData {
+  const local = initialCausalityGraph;
+  const serviceId = `service:${incident.service}`;
+  const incidentId = `incident:${incident.incidentId}`;
+  const deploymentId = `deployment:${incident.service}:${incident.deploymentVersion}`;
+  const text = `${incident.summary} ${incident.logs.join(" ")}`.toLowerCase();
+  const signals: Array<Omit<GraphNode, "x" | "y">> = [];
+
+  if (text.includes("redis") || "redis_latency_ms" in incident.telemetry) {
+    signals.push({
+      id: `signal:${incident.service}:redis`,
+      label: "Redis saturation",
+      kind: "signal",
+      detail: "Redis latency or pool pressure detected from incident telemetry.",
+      service: incident.service,
+      score: 0.88
+    });
+  }
+  if (text.includes("oom") || text.includes("memory") || "restart_count" in incident.telemetry) {
+    signals.push({
+      id: `signal:${incident.service}:memory`,
+      label: "Memory pressure",
+      kind: "signal",
+      detail: "Memory pressure or restart signals detected.",
+      service: incident.service,
+      score: 0.9
+    });
+  }
+  if (text.includes("lag") || "consumer_lag" in incident.telemetry || "lag" in incident.telemetry) {
+    signals.push({
+      id: `signal:${incident.service}:lag`,
+      label: "Queue lag",
+      kind: "signal",
+      detail: "Consumer lag or queue backlog is part of the failure chain.",
+      service: incident.service,
+      score: 0.8
+    });
+  }
+  const activeSignals = signals.length ? signals : local.nodes.filter((node) => node.kind === "signal" || node.kind === "metric");
+  const nodes: CausalityGraphData["nodes"] = [
+    {
+      id: deploymentId,
+      label: `Deploy ${incident.deploymentVersion}`,
+      kind: "deployment",
+      service: incident.service,
+      detail: "Deployment marker used as the first causality checkpoint.",
+      score: 0.72
+    },
+    {
+      id: serviceId,
+      label: incident.service,
+      kind: "service",
+      service: incident.service,
+      detail: "Affected service under investigation.",
+      score: 0.8
+    },
+    ...activeSignals,
+    {
+      id: `fault:${incident.service}:impact`,
+      label: "User impact",
+      kind: "fault",
+      service: incident.service,
+      detail: "Customer-visible impact inferred from unhealthy signals.",
+      score: 0.82
+    },
+    {
+      id: incidentId,
+      label: incident.incidentId,
+      kind: "incident",
+      service: incident.service,
+      severity: incident.severity,
+      detail: incident.summary,
+      score: 1
+    }
+  ];
+  const edges: CausalityEdge[] = [
+    { source: deploymentId, target: serviceId, relationship: "CHANGED", weight: 0.75, evidence: [incident.deploymentVersion] },
+    ...activeSignals.map((signal) => ({
+      source: serviceId,
+      target: signal.id,
+      relationship: "EMITTED",
+      weight: signal.score ?? 0.75,
+      evidence: incident.logs.slice(0, 2)
+    })),
+    ...activeSignals.map((signal) => ({
+      source: signal.id,
+      target: `fault:${incident.service}:impact`,
+      relationship: "PROPAGATED_TO",
+      weight: signal.score ?? 0.75,
+      evidence: Object.entries(incident.telemetry).map(([key, value]) => `${key}=${value}`).slice(0, 2)
+    })),
+    { source: `fault:${incident.service}:impact`, target: incidentId, relationship: "CAUSED", weight: 0.9, evidence: [incident.summary] }
+  ];
+  return {
+    incidentId: incident.incidentId,
+    tenantId: "default",
+    nodes,
+    edges,
+    blastRadius: [incident.service, `${incident.service}:downstream`],
+    recurringPatterns: activeSignals.map((signal) => signal.label.toLowerCase().replace(/\s+/g, "-")),
+    reasoningSummary: `Local graph linked ${activeSignals.length} telemetry signals to ${incident.incidentId}.`
+  };
 }
 
 function tokenize(value: string) {

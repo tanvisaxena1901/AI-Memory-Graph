@@ -1,5 +1,6 @@
-from models import AccessRole
+from models import AccessRole, GraphTraversalRequest, TelemetryCausalityRequest
 from retrieval.incident_memory import IncidentMemoryStore
+from retrieval.graph_repository import GraphRepository
 
 
 def embed(text: str) -> list[float]:
@@ -109,3 +110,55 @@ def test_synthetic_dataset_evaluation_audit_and_postmortem():
     draft = store.postmortem("SYN-0001", "tenant-1")
     assert draft is not None
     assert draft.incidentId == "SYN-0001"
+
+
+def test_reasoning_trace_replay_records_retrieval_events():
+    store = IncidentMemoryStore()
+    store.index_seed_memories(embed)
+
+    store.search(
+        embed("payment redis timeout"),
+        "payment-service",
+        3,
+        role=AccessRole.PLATFORM_ADMIN,
+        requested_by="operator-1",
+        query_text="payment redis timeout",
+    )
+    trace_id = store.latest_trace_id()
+    store.append_reasoning_event(
+        trace_id,
+        step="RCA_GENERATION",
+        detail="Generated test RCA.",
+        incident_id="INC-BENCH-REDIS-POOL",
+        service="payment-service",
+    )
+
+    replay = store.reasoning_replay(trace_id)
+    assert replay is not None
+    assert replay.workflowPath[:2] == ["QUERY_EMBEDDING", "MEMORY_RETRIEVAL"]
+    assert replay.events[-1].step == "RCA_GENERATION"
+
+
+def test_telemetry_causality_graph_and_traversal_fallback():
+    graph_repository = GraphRepository()
+    graph = graph_repository.build_causality_graph(
+        TelemetryCausalityRequest(
+            incidentId="INC-CAUSAL-1",
+            service="payment-service",
+            deploymentVersion="v2.3",
+            telemetry={"redis_latency_ms": 900, "error_rate": 0.18, "p95_latency_ms": 1800},
+            logs=["redis timeout after 500ms", "connection pool exhausted"],
+            events=["Deploy v2.3 completed"],
+        )
+    )
+
+    assert graph.incidentId == "INC-CAUSAL-1"
+    assert any(node.kind == "signal" and node.label == "Redis saturation" for node in graph.nodes)
+    assert any(edge.relationship == "CAUSED" for edge in graph.edges)
+    assert "payment-service" in graph.blastRadius
+
+    traversal = graph_repository.traverse(
+        GraphTraversalRequest(startNodeId="service:payment-service", maxDepth=2)
+    )
+    assert traversal.nodes
+    assert traversal.edges

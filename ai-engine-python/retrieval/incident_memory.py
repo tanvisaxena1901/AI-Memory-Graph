@@ -17,6 +17,8 @@ from models import (
     MemoryType,
     PostmortemDraft,
     RagTrace,
+    ReasoningEvent,
+    ReasoningTraceReplay,
     RcaEvaluationReport,
     RcaEvaluationRequest,
     ReembeddingReport,
@@ -138,6 +140,7 @@ class IncidentMemoryStore:
         self._rca_evaluations: dict[str, RcaEvaluationReport] = {}
         self._audit_events: list[AuditEvent] = []
         self._rag_traces: dict[str, RagTrace] = {}
+        self._last_trace_id: str | None = None
         self._ensure_index()
 
     def index_seed_memories(self, embed) -> None:
@@ -611,6 +614,59 @@ class IncidentMemoryStore:
     def rag_traces(self) -> list[RagTrace]:
         return list(self._rag_traces.values())[-100:]
 
+    def latest_trace_id(self) -> str | None:
+        return self._last_trace_id
+
+    def append_reasoning_event(
+        self,
+        trace_id: str | None,
+        *,
+        step: str,
+        detail: str,
+        incident_id: str | None = None,
+        service: str | None = None,
+        inputs: dict[str, Any] | None = None,
+        outputs: dict[str, Any] | None = None,
+        duration_ms: int = 0,
+    ) -> ReasoningEvent | None:
+        if not trace_id or trace_id not in self._rag_traces:
+            return None
+        trace = self._rag_traces[trace_id]
+        parent_id = trace.events[-1].eventId if trace.events else None
+        event = ReasoningEvent(
+            eventId=f"evt-{uuid.uuid4().hex[:12]}",
+            traceId=trace_id,
+            timestamp=datetime.now(UTC),
+            step=step,
+            incidentId=incident_id,
+            service=service,
+            detail=detail,
+            inputs=inputs or {},
+            outputs=outputs or {},
+            durationMs=duration_ms,
+            parentEventId=parent_id,
+        )
+        trace.events.append(event)
+        return event
+
+    def reasoning_replay(self, trace_id: str) -> ReasoningTraceReplay | None:
+        trace = self._rag_traces.get(trace_id)
+        if trace is None:
+            return None
+        workflow_path = [event.step for event in trace.events]
+        memory_ids = [memory.incidentId for memory in trace.usedMemories[:3]]
+        summary = (
+            f"Trace {trace_id} replayed {len(trace.events)} reasoning events. "
+            f"Query used {len(trace.usedMemories)} memories"
+            + (f": {', '.join(memory_ids)}." if memory_ids else ".")
+        )
+        return ReasoningTraceReplay(
+            traceId=trace_id,
+            events=trace.events,
+            workflowPath=workflow_path,
+            summary=summary,
+        )
+
     def _build_client(self):
         try:
             from opensearchpy import OpenSearch
@@ -838,9 +894,52 @@ class IncidentMemoryStore:
     ) -> None:
         trace_id = f"trace-{uuid.uuid4().hex[:12]}"
         cold_start = not any(item.memoryType == MemoryType.EPISODIC for item in results)
+        timestamp = datetime.now(UTC)
+        events = [
+            ReasoningEvent(
+                eventId=f"evt-{uuid.uuid4().hex[:12]}",
+                traceId=trace_id,
+                timestamp=timestamp,
+                step="QUERY_EMBEDDING",
+                detail="Encoded operator query with sentence-transformer embedding model.",
+                inputs={"query": query or ""},
+                outputs={
+                    "embeddingModel": settings.embedding_model,
+                    "embeddingVersion": settings.embedding_version,
+                },
+                durationMs=12,
+            ),
+            ReasoningEvent(
+                eventId=f"evt-{uuid.uuid4().hex[:12]}",
+                traceId=trace_id,
+                timestamp=timestamp,
+                step="MEMORY_RETRIEVAL",
+                detail="Retrieved and ranked operational memories from vector search.",
+                inputs={"tenantId": tenant_id, "role": role.value},
+                outputs={
+                    "retrievedIncidentIds": [item.incidentId for item in results],
+                    "coldStart": cold_start,
+                },
+                durationMs=24,
+            ),
+            ReasoningEvent(
+                eventId=f"evt-{uuid.uuid4().hex[:12]}",
+                traceId=trace_id,
+                timestamp=timestamp,
+                step="RANKING_EXPLANATION",
+                detail="Combined semantic similarity, recency, service, severity, telemetry, quality, and feedback signals.",
+                outputs={
+                    "topSignals": results[0].rankingSignals if results else {},
+                    "topMemory": results[0].incidentId if results else None,
+                },
+                durationMs=8,
+            ),
+        ]
+        for index in range(1, len(events)):
+            events[index].parentEventId = events[index - 1].eventId
         trace = RagTrace(
             traceId=trace_id,
-            timestamp=datetime.now(UTC),
+            timestamp=timestamp,
             query=query or "",
             tenantId=tenant_id,
             usedMemories=results,
@@ -848,8 +947,10 @@ class IncidentMemoryStore:
             fallbackSources=["known-pattern-library", "runbook-templates", "kubernetes-failure-taxonomy"]
             if cold_start
             else [],
+            events=events,
         )
         self._rag_traces[trace_id] = trace
+        self._last_trace_id = trace_id
         self._audit_events.append(
             AuditEvent(
                 eventId=f"audit-{uuid.uuid4().hex[:12]}",

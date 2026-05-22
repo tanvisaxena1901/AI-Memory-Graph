@@ -56,6 +56,16 @@ These signals make memories telemetry-rich rather than plain text only. Memory s
 signal overlap as one ranking feature alongside vector similarity, service, severity, recency,
 remediation success, and human feedback.
 
+The same normalized signals can build a causality graph:
+
+```text
+deployment change -> affected service -> telemetry signal -> fault -> incident
+```
+
+For example, `redis_latency_ms`, `error_rate`, and `p95_latency_ms` become Redis saturation and
+API degradation nodes connected to the current incident. The graph can be traversed from any node
+to estimate blast radius and recurring operational patterns.
+
 ## Normalized Telemetry API
 
 Dashboard and development clients can post normalized events:

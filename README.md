@@ -22,6 +22,8 @@ This repository implements the Phase 1 MVP:
 - operator feedback capture for helpfulness, RCA correctness, and remediation outcome
 - RCA evaluation reports comparing AI RCA against human-confirmed RCA
 - audit trail, RAG trace viewer data, and postmortem draft generation
+- telemetry causality graph build/traversal APIs for deployment, signal, fault, and incident lineage
+- AI reasoning trace replay for memory retrieval, graph traversal, and RCA generation steps
 - synthetic incident dataset generation and retrieval evaluation with precision@5, recall@5, MRR, and hit rate
 - Neo4j operational graph writes
 - OpenTelemetry Collector ingestion for metrics, logs, and traces with normalized incident telemetry signals
@@ -160,6 +162,21 @@ Graph RCA query:
 curl 'http://localhost:8080/api/v1/graph/incidents?service=payment-service&rootCause=Redis%20saturation'
 ```
 
+Build a telemetry causality graph:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/graph/causality \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "incidentId":"INC-1001",
+    "service":"payment-service",
+    "deploymentVersion":"v2.3",
+    "telemetry":{"redis_latency_ms":900,"error_rate":0.18,"p95_latency_ms":1800},
+    "logs":["redis timeout after 500ms","connection pool exhausted"],
+    "events":["Deploy v2.3 completed"]
+  }'
+```
+
 Operational AI-infra endpoints:
 
 ```bash
@@ -168,6 +185,7 @@ curl -X POST 'http://localhost:8080/api/v1/memory/synthetic-dataset?count=60'
 curl http://localhost:8080/api/v1/evaluation/retrieval
 curl http://localhost:8080/api/v1/audit/events
 curl http://localhost:8080/api/v1/rag/traces
+curl http://localhost:8080/api/v1/reasoning/traces/{traceId}/replay
 curl http://localhost:8080/api/v1/postmortems/INC-1001?tenantId=tenant-1
 curl http://localhost:8080/api/v1/graph/insights?tenantId=tenant-1
 ```

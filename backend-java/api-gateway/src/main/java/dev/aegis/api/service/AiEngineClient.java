@@ -1,14 +1,18 @@
 package dev.aegis.api.service;
 
 import dev.aegis.common.model.BenchmarkReport;
+import dev.aegis.common.model.CausalityGraph;
+import dev.aegis.common.model.GraphTraversalRequest;
 import dev.aegis.common.model.IncidentDto;
 import dev.aegis.common.model.MemoryFeedbackRequest;
+import dev.aegis.common.model.ReasoningTraceReplay;
 import dev.aegis.common.model.RcaEvaluationReport;
 import dev.aegis.common.model.RcaEvaluationRequest;
 import dev.aegis.common.model.RcaRequest;
 import dev.aegis.common.model.RcaResponse;
 import dev.aegis.common.model.SemanticSearchRequest;
 import dev.aegis.common.model.SimilarIncident;
+import dev.aegis.common.model.TelemetryCausalityRequest;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
@@ -153,6 +157,42 @@ public class AiEngineClient {
                         .build())
                 .retrieve()
                 .bodyToMono(Map.class);
+    }
+
+    public Mono<CausalityGraph> buildCausalityGraph(TelemetryCausalityRequest request) {
+        return webClient.post()
+                .uri("/api/v1/graph/causality")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono(CausalityGraph.class);
+    }
+
+    public Mono<CausalityGraph> latestCausalityGraph(String incidentId) {
+        return webClient.get()
+                .uri(uriBuilder -> {
+                    var builder = uriBuilder.path("/api/v1/graph/causality");
+                    if (incidentId != null && !incidentId.isBlank()) {
+                        builder.queryParam("incidentId", incidentId);
+                    }
+                    return builder.build();
+                })
+                .retrieve()
+                .bodyToMono(CausalityGraph.class);
+    }
+
+    public Mono<CausalityGraph> traverseGraph(GraphTraversalRequest request) {
+        return webClient.post()
+                .uri("/api/v1/graph/traverse")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono(CausalityGraph.class);
+    }
+
+    public Mono<ReasoningTraceReplay> replayReasoningTrace(String traceId) {
+        return webClient.get()
+                .uri("/api/v1/reasoning/traces/{traceId}/replay", traceId)
+                .retrieve()
+                .bodyToMono(ReasoningTraceReplay.class);
     }
 
     private Mono<Map> postEmpty(String path) {

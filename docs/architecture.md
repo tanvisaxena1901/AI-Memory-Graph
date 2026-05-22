@@ -37,7 +37,9 @@ Telemetry Service
 8. Python indexes episodic incident memory in OpenSearch alongside semantic failure patterns and procedural runbooks.
 9. Python upserts service, deployment, incident, root-cause, and remediation relationships in Neo4j.
 10. Memory search and RCA endpoints retrieve related memory and generate analysis.
-11. Operator feedback and human-confirmed RCA reports update future ranking, calibration, audit, and evaluation metrics.
+11. Telemetry causality graph APIs derive deployment, signal, fault, service, and incident relationships for Neo4j traversal.
+12. Reasoning trace replay records query embedding, memory retrieval, graph causality, and RCA generation events.
+13. Operator feedback and human-confirmed RCA reports update future ranking, calibration, audit, and evaluation metrics.
 
 ## Telemetry Flow
 
@@ -91,6 +93,12 @@ Audit and RAG trace records make retrieval explainable:
 who searched -> query -> retrieved memories -> recommendation -> action taken
 ```
 
+Reasoning replay adds workflow-level observability:
+
+```text
+query embedding -> memory retrieval -> graph causality -> RCA generation -> replay timeline
+```
+
 ## Domain Graph
 
 ```text
@@ -106,6 +114,16 @@ This supports graph RCA questions such as:
 Show all incidents caused by Redis saturation in payment services.
 Service -> Deployment -> Incident -> RootCause -> Remediation
 ```
+
+Telemetry causality graphs also model live infrastructure chains:
+
+```text
+Deployment -> Service -> Telemetry Signal -> Fault -> Incident
+Node pressure -> Pod evictions -> Kafka lag -> API timeout
+```
+
+The API can return the latest graph, build a graph from an incident payload, or traverse from any
+node to estimate blast radius and recurring patterns.
 
 ## Aegis Integration
 

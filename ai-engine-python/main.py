@@ -10,11 +10,14 @@ from models import (
     BenchmarkResult,
     AccessRole,
     AuditEvent,
+    CausalityGraph,
     GraphInsightReport,
+    GraphTraversalRequest,
     IndexIncidentRequest,
     MemoryFeedbackRequest,
     PostmortemDraft,
     RagTrace,
+    ReasoningTraceReplay,
     RcaEvaluationReport,
     RcaEvaluationRequest,
     RcaRequest,
@@ -24,6 +27,7 @@ from models import (
     SemanticSearchRequest,
     SimilarIncident,
     SyntheticDatasetReport,
+    TelemetryCausalityRequest,
 )
 from rca_engine import RcaGenerator
 from retrieval import IncidentMemoryStore
@@ -100,6 +104,17 @@ async def rca(request: RcaRequest) -> RcaResponse:
     )
     response = await rca_generator.generate(request, similar)
     response.confidence = round(min(max(similar[0].rankScore if similar else 0.45, 0.35), 0.95), 2)
+    response.traceId = memory_store.latest_trace_id()
+    memory_store.append_reasoning_event(
+        response.traceId,
+        step="RCA_GENERATION",
+        detail="Generated RCA from current evidence, retrieved memories, and telemetry context.",
+        incident_id=request.incidentId,
+        service=similar[0].service if similar else None,
+        inputs={"query": request.query, "logCount": len(request.logs or [])},
+        outputs={"likelyRootCause": response.likelyRootCause, "confidence": response.confidence},
+        duration_ms=42,
+    )
     return response
 
 
@@ -121,6 +136,32 @@ def graph_incidents(rootCause: str, service: str | None = None) -> list[dict[str
 @app.get("/api/v1/graph/insights", response_model=GraphInsightReport)
 def graph_insights(tenantId: str = "default") -> GraphInsightReport:
     return memory_store.graph_insights(tenantId)
+
+
+@app.post("/api/v1/graph/causality", response_model=CausalityGraph)
+def build_causality_graph(request: TelemetryCausalityRequest) -> CausalityGraph:
+    graph = graph_repository.build_causality_graph(request)
+    memory_store.append_reasoning_event(
+        memory_store.latest_trace_id(),
+        step="GRAPH_CAUSALITY",
+        detail="Built telemetry causality graph from metrics, logs, events, and deployment context.",
+        incident_id=graph.incidentId,
+        service=request.service,
+        inputs={"telemetryKeys": list(request.telemetry.keys()), "eventCount": len(request.events)},
+        outputs={"nodes": len(graph.nodes), "edges": len(graph.edges), "blastRadius": graph.blastRadius},
+        duration_ms=18,
+    )
+    return graph
+
+
+@app.get("/api/v1/graph/causality", response_model=CausalityGraph)
+def latest_causality_graph(incidentId: str | None = None) -> CausalityGraph:
+    return graph_repository.latest_causality_graph(incidentId)
+
+
+@app.post("/api/v1/graph/traverse", response_model=CausalityGraph)
+def traverse_graph(request: GraphTraversalRequest) -> CausalityGraph:
+    return graph_repository.traverse(request)
 
 
 @app.post("/api/v1/memory/reembed", response_model=ReembeddingReport)
@@ -146,6 +187,14 @@ def audit_events() -> list[AuditEvent]:
 @app.get("/api/v1/rag/traces", response_model=list[RagTrace])
 def rag_traces() -> list[RagTrace]:
     return memory_store.rag_traces()
+
+
+@app.get("/api/v1/reasoning/traces/{trace_id}/replay", response_model=ReasoningTraceReplay)
+def reasoning_trace_replay(trace_id: str) -> ReasoningTraceReplay:
+    replay = memory_store.reasoning_replay(trace_id)
+    if replay is None:
+        raise HTTPException(status_code=404, detail="reasoning trace not found")
+    return replay
 
 
 @app.get("/api/v1/postmortems/{incident_id}", response_model=PostmortemDraft)
