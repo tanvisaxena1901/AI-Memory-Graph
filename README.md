@@ -62,6 +62,32 @@ Start dependencies and services:
 docker compose -f infra/docker/docker-compose.yml up --build
 ```
 
+## Production Hosting
+
+GitHub Pages hosts only the static React dashboard. The Java/Python backend services need a separate HTTPS host, such as a VPS running Docker Compose.
+
+On a VPS, point a DNS record such as `api.example.com` to the server, copy this repository to the server, create a production env file, and start the backend stack:
+
+```bash
+cp .env.example .env
+# edit .env with strong passwords and BACKEND_DOMAIN=api.example.com
+docker compose --env-file .env -f infra/docker/docker-compose.prod.yml up -d --build
+```
+
+The production Compose file uses Caddy for HTTPS and routes:
+
+- `https://api.example.com/api/*` to the API gateway
+- `https://api.example.com/api/v1/telemetry*` to the telemetry service
+
+Set these GitHub repository variables before rebuilding GitHub Pages:
+
+```bash
+gh variable set VITE_API_BASE_URL --body https://api.example.com
+gh variable set VITE_TELEMETRY_API_BASE_URL --body https://api.example.com
+```
+
+The backend CORS default allows `https://tanvisaxena1901.github.io`. Override it with `AEGIS_ALLOWED_ORIGINS` if you add more frontend origins.
+
 API gateway:
 
 - OpenAPI UI: `http://localhost:8080/swagger-ui.html`

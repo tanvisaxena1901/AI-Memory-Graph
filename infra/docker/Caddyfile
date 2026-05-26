@@ -1,0 +1,25 @@
+{$BACKEND_DOMAIN} {
+	encode zstd gzip
+
+	handle /api/v1/telemetry* {
+		reverse_proxy telemetry-service:8081
+	}
+
+	handle /api/* {
+		reverse_proxy api-gateway:8080
+	}
+
+	handle /actuator/* {
+		reverse_proxy api-gateway:8080
+	}
+
+	handle /swagger-ui* {
+		reverse_proxy api-gateway:8080
+	}
+
+	handle /v3/* {
+		reverse_proxy api-gateway:8080
+	}
+
+	respond "AEGIS backend is running" 200
+}

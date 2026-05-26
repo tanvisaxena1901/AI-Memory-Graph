@@ -25,6 +25,7 @@ import {
   TerminalSquare,
   UserRound
 } from "lucide-react";
+import { apiUrl, telemetryApiUrl } from "./config";
 import "./styles.css";
 
 type Severity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -405,7 +406,7 @@ function App() {
   async function runSearch() {
     const selectedTelemetry = selectedIncident.telemetry;
     try {
-      const response = await fetch("/api/v1/memory/search", {
+      const response = await fetch(apiUrl("/api/v1/memory/search"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -455,7 +456,7 @@ function App() {
     };
 
     try {
-      const response = await fetch("/telemetry-api/v1/telemetry", {
+      const response = await fetch(telemetryApiUrl("/api/v1/telemetry"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sample)
@@ -495,7 +496,7 @@ function App() {
 
   async function generateRca() {
     try {
-      const response = await fetch("/api/v1/rca", {
+      const response = await fetch(apiUrl("/api/v1/rca"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -527,7 +528,7 @@ function App() {
 
   async function buildCausalityGraph() {
     try {
-      const response = await fetch("/api/v1/graph/causality", {
+      const response = await fetch(apiUrl("/api/v1/graph/causality"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -564,7 +565,7 @@ function App() {
 
   async function loadReasoningReplay(traceId: string) {
     try {
-      const response = await fetch(`/api/v1/reasoning/traces/${traceId}/replay`);
+      const response = await fetch(apiUrl(`/api/v1/reasoning/traces/${traceId}/replay`));
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -593,7 +594,7 @@ function App() {
     setChatBusy(true);
 
     try {
-      const response = await fetch("/api/v1/rca", {
+      const response = await fetch(apiUrl("/api/v1/rca"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

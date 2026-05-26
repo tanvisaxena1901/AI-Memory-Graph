@@ -52,6 +52,8 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.telemetry-service
+    environment:
+      AEGIS_ALLOWED_ORIGINS: ${AEGIS_ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:5173,http://127.0.0.1:5174,https://tanvisaxena1901.github.io}
     ports:
       - "8081:8081"
 
@@ -76,6 +78,7 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: aegis
       AI_ENGINE_BASE_URL: http://ai-engine:8000
+      AEGIS_ALLOWED_ORIGINS: ${AEGIS_ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:5173,http://127.0.0.1:5174,https://tanvisaxena1901.github.io}
     ports:
       - "8080:8080"
     depends_on:

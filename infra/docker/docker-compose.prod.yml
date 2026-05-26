@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aegis}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD:?Set OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.25
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:?Set NEO4J_AUTH, for example neo4j/strong-password}
+    volumes:
+      - neo4j-data:/data
+    restart: unless-stopped
+
+  ai-engine:
+    build:
+      context: ../../ai-engine-python
+      dockerfile: Dockerfile
+    environment:
+      AEGIS_OPENSEARCH_URL: http://opensearch:9200
+      AEGIS_NEO4J_URI: bolt://neo4j:7687
+      AEGIS_NEO4J_USER: ${AEGIS_NEO4J_USER:-neo4j}
+      AEGIS_NEO4J_PASSWORD: ${AEGIS_NEO4J_PASSWORD:?Set AEGIS_NEO4J_PASSWORD}
+    depends_on:
+      - opensearch
+      - neo4j
+    restart: unless-stopped
+
+  telemetry-service:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.telemetry-service
+    environment:
+      AEGIS_ALLOWED_ORIGINS: ${AEGIS_ALLOWED_ORIGINS:-https://tanvisaxena1901.github.io}
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api-gateway
+    environment:
+      POSTGRES_R2DBC_URL: r2dbc:postgresql://postgres:5432/${POSTGRES_DB:-aegis}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      AI_ENGINE_BASE_URL: http://ai-engine:8000
+      AEGIS_ALLOWED_ORIGINS: ${AEGIS_ALLOWED_ORIGINS:-https://tanvisaxena1901.github.io}
+    depends_on:
+      - postgres
+      - ai-engine
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8
+    environment:
+      BACKEND_DOMAIN: ${BACKEND_DOMAIN:?Set BACKEND_DOMAIN, for example api.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api-gateway
+      - telemetry-service
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  opensearch-data:
+  neo4j-data:
+  caddy-data:
+  caddy-config:
