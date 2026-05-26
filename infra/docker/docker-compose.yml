@@ -85,7 +85,62 @@ services:
       - postgres
       - ai-engine
 
+  prometheus:
+    image: prom/prometheus:latest
+    profiles:
+      - observability
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api-gateway
+      - telemetry-service
+      - otel-collector
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles:
+      - observability
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  synthetic-incidents:
+    image: grafana/k6:latest
+    profiles:
+      - synthetic
+    environment:
+      API_BASE_URL: http://api-gateway:8080
+      TELEMETRY_API_BASE_URL: http://telemetry-service:8081
+      TENANT_ID: synthetic
+      SYNTHETIC_PROFILE: ${SYNTHETIC_PROFILE:-incident-management}
+      VUS: ${SYNTHETIC_VUS:-3}
+      DURATION: ${SYNTHETIC_DURATION:-5m}
+      INCIDENT_RATE: ${SYNTHETIC_INCIDENT_RATE:-0.35}
+      SLEEP_SECONDS: ${SYNTHETIC_SLEEP_SECONDS:-1}
+    volumes:
+      - ../k6:/scripts:ro
+    command: ["run", "/scripts/synthetic-incidents.js"]
+    depends_on:
+      - api-gateway
+      - telemetry-service
+
 volumes:
   postgres-data:
   opensearch-data:
   neo4j-data:
+  prometheus-data:
+  grafana-data:

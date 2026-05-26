@@ -112,6 +112,54 @@ OpenTelemetry Collector:
 - OTLP gRPC receiver: `localhost:4317`
 - OTLP HTTP receiver: `localhost:4318`
 
+## Synthetic Incident Traffic
+
+For a realistic demo loop, use the synthetic incident API to generate incident-shaped payloads, then use k6 to drive telemetry ingestion, incident creation, RCA requests, memory searches, and causality graph builds.
+
+This uses the open-source k6 CLI Docker image only. No k6 Cloud account or Grafana Cloud account is required.
+
+Generate one synthetic workflow payload directly:
+
+```bash
+curl 'http://localhost:8080/api/v1/synthetic/incidents/next?tenantId=synthetic&profile=incident-management'
+```
+
+Start the backend plus Prometheus and Grafana:
+
+```bash
+docker compose -f infra/docker/docker-compose.yml --profile observability up --build
+```
+
+Then run the synthetic incident stream in another terminal:
+
+```bash
+docker compose -f infra/docker/docker-compose.yml --profile synthetic run --rm synthetic-incidents
+```
+
+Useful local URLs:
+
+- dashboard: `http://localhost:5174`
+- API gateway metrics: `http://localhost:8080/actuator/prometheus`
+- telemetry service metrics: `http://localhost:8081/actuator/prometheus`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (`admin` / `admin` by default)
+- recent telemetry: `http://localhost:8081/api/v1/telemetry/recent`
+
+Tune the generator with env vars:
+
+```bash
+SYNTHETIC_VUS=8 SYNTHETIC_DURATION=15m SYNTHETIC_INCIDENT_RATE=0.5 \
+  docker compose -f infra/docker/docker-compose.yml --profile synthetic run --rm synthetic-incidents
+```
+
+To seed historical memory before live simulation, call:
+
+```bash
+curl -X POST 'http://localhost:8080/api/v1/memory/synthetic-dataset?count=60'
+```
+
+The generated traffic is intentionally incident-shaped: the API produces noisy metric samples and workflow payloads, while k6 stores incidents, indexes memory, asks for RCA, and builds causality graphs. Prometheus/Grafana observe service health; k6 drives the incident workflow.
+
 ## Example Incident
 
 ```bash
