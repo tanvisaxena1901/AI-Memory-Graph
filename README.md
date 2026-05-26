@@ -160,6 +160,56 @@ curl -X POST 'http://localhost:8080/api/v1/memory/synthetic-dataset?count=60'
 
 The generated traffic is intentionally incident-shaped: the API produces noisy metric samples and workflow payloads, while k6 stores incidents, indexes memory, asks for RCA, and builds causality graphs. Prometheus/Grafana observe service health; k6 drives the incident workflow.
 
+## OpenTelemetry Demo As Signal Source
+
+For more realistic telemetry, run the official OpenTelemetry Demo application and export its OTLP data into the AEGIS collector. This gives you live service metrics, traces, and logs from a real microservice demo instead of template-only traffic.
+
+Start AEGIS with observability:
+
+```bash
+docker compose -f infra/docker/docker-compose.yml --profile observability up --build
+```
+
+The AEGIS collector listens on:
+
+- OTLP gRPC: `localhost:4317`
+- OTLP HTTP: `localhost:4318`
+- Prometheus exporter for received OTel metrics: `localhost:9464`
+
+Run the OpenTelemetry Demo in a separate checkout and add AEGIS as an extra OTLP backend in the demo collector config:
+
+```bash
+git clone https://github.com/open-telemetry/opentelemetry-demo.git ../opentelemetry-demo
+cd ../opentelemetry-demo
+```
+
+Edit `src/otel-collector/otelcol-config-extras.yml` in the demo checkout:
+
+```yaml
+exporters:
+  otlp/aegis:
+    endpoint: host.docker.internal:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      exporters: [otlp/aegis]
+    metrics:
+      exporters: [otlp/aegis]
+    logs:
+      exporters: [otlp/aegis]
+```
+
+Then start the demo:
+
+```bash
+docker compose -f docker-compose.minimal.yml up --force-recreate --remove-orphans --detach
+```
+
+Prometheus will scrape the AEGIS collector's Prometheus exporter at `otel-collector:9464`, so OpenTelemetry Demo metrics become visible at `http://localhost:9090` and in Grafana at `http://localhost:3000`.
+
 ## Example Incident
 
 ```bash

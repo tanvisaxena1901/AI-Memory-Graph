@@ -29,6 +29,11 @@ exporters:
   otlphttp/aegis:
     endpoint: http://telemetry-service:8081
 
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    resource_to_telemetry_conversion:
+      enabled: true
+
   debug:
     verbosity: basic
 
@@ -37,7 +42,7 @@ service:
     metrics:
       receivers: [otlp, hostmetrics]
       processors: [resource, batch]
-      exporters: [otlphttp/aegis, debug]
+      exporters: [otlphttp/aegis, prometheus, debug]
     logs:
       receivers: [otlp]
       processors: [resource, batch]

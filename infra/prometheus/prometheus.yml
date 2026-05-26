@@ -19,3 +19,8 @@ scrape_configs:
     static_configs:
       - targets:
           - otel-collector:8888
+
+  - job_name: otel-demo-signals
+    static_configs:
+      - targets:
+          - otel-collector:9464
