@@ -1,6 +1,6 @@
 # AI Memory Graph - Telemetry Analysis
 
-AEGIS, short for Autonomous Execution, Graph Intelligence and Stateful Runtime, is an AI-native incident analysis platform. It turns raw telemetry, incidents, and historical memory into a working operational graph so an operator can ask what happened, why it happened, what similar incidents look like, and what to fix first.
+AI Memory Graph is an AI-native incident analysis platform. It turns raw telemetry, incidents, and historical memory into a working operational graph so an operator can ask what happened, why it happened, what similar incidents look like, and what to fix first.
 
 The project combines four things:
 
