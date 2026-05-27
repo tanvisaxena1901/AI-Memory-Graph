@@ -1,216 +1,189 @@
-# AEGIS
+# AI Memory Graph - Telemetry Analysis
 
-Autonomous Execution, Graph Intelligence & Stateful Runtime.
+AEGIS, short for Autonomous Execution, Graph Intelligence and Stateful Runtime, is an AI-native incident analysis platform. It turns raw telemetry, incidents, and historical memory into a working operational graph so an operator can ask what happened, why it happened, what similar incidents look like, and what to fix first.
 
-AEGIS is an AI-native operational memory platform for infrastructure systems. It ingests incidents and telemetry, stores semantic memory, builds an operational graph, retrieves similar incidents with vector search, and generates RCA/remediation suggestions.
+The project combines four things:
 
-This repository implements the Phase 1 MVP:
+- incident memory search across episodic incidents, semantic failure patterns, and procedural runbooks
+- telemetry ingestion for metrics, logs, and traces
+- causality graph generation and traversal for incident lineage
+- RCA generation with evidence, remediation, trace replay, and feedback loops
 
-- incident ingestion API
-- PostgreSQL incident metadata persistence
-- Python embedding pipeline with `sentence-transformers`
-- OpenSearch vector indexing and semantic retrieval
-- incident similarity benchmark with top-k accuracy, recall@5, and similarity score
-- explicit AI memory types: episodic incidents, semantic failure patterns, and procedural runbooks
-- memory ranking by semantic similarity, recency, service, severity, remediation success, telemetry match, and human feedback
-- memory schema and embedding model versioning for explainable retrieval after model changes
-- re-embedding jobs for model/schema upgrades
-- hot/warm/archived memory TTL tiers and memory quality scoring
-- PII/secret redaction before logs are stored
-- tenant/team/service-owner isolation and role-aware retrieval
-- duplicate incident detection and incident-family clustering
-- operator feedback capture for helpfulness, RCA correctness, and remediation outcome
-- RCA evaluation reports comparing AI RCA against human-confirmed RCA
-- audit trail, RAG trace viewer data, and postmortem draft generation
-- telemetry causality graph build/traversal APIs for deployment, signal, fault, and incident lineage
-- AI reasoning trace replay for memory retrieval, graph traversal, and RCA generation steps
-- synthetic incident dataset generation and retrieval evaluation with precision@5, recall@5, MRR, and hit rate
-- Neo4j operational graph writes
-- OpenTelemetry Collector ingestion for metrics, logs, and traces with normalized incident telemetry signals
-- basic AI RCA generation
-- Dockerized local infrastructure
-- React dashboard shell
+## What It Does
+
+AEGIS is designed for infrastructure and platform teams that need faster incident triage with more context than a plain log search or dashboard can provide.
+
+It helps you:
+
+- identify likely root cause from current logs, telemetry, and similar incidents
+- compare a live incident with historical failures
+- build and inspect a causality graph for dependencies, deployment changes, and signals
+- feed telemetry into a shared incident memory store
+- generate postmortem-friendly RCA summaries and remediation steps
+- replay reasoning traces so the analysis is explainable
+
+## How It Works
+
+At a high level:
+
+1. The dashboard captures the current incident context.
+2. The API gateway receives incident, memory, graph, and RCA requests.
+3. The AI engine embeds the query, searches OpenSearch memory, and consults Neo4j graph data.
+4. Telemetry flows through the telemetry service and OpenTelemetry Collector.
+5. The dashboard renders RCA, graph, memory, and reasoning views from those APIs.
+
+When Ollama is available, the Python AI engine can use it for generated RCA text. When it is not, the engine still produces an incident-aware RCA from telemetry, logs, and retrieved memory.
+
+## Architecture
+
+```text
+React dashboard
+  -> Spring WebFlux API gateway
+      -> PostgreSQL incident metadata
+      -> Python AI engine
+          -> OpenSearch incident memory
+          -> Neo4j operational graph
+      -> Telemetry service
+          -> OpenTelemetry Collector
+          -> Prometheus / Grafana
+```
+
+Main runtime pieces:
+
+- `frontend/dashboard` - the React UI for incident analysis, memory search, graph inspection, RCA chat, and reasoning replay
+- `backend-java/api-gateway` - the public incident and analysis API
+- `backend-java/telemetry-service` - telemetry ingestion and normalization
+- `ai-engine-python` - embeddings, retrieval, graph-aware RCA, evaluation, and synthetic dataset generation
+- `infra/docker` - local Compose stack for the full system
 
 ## Repository Layout
 
 ```text
 backend-java/
   api-gateway/          Spring WebFlux incident/RCA API
-  telemetry-service/    telemetry ingestion stub for Phase 2
-  workflow-runtime/     workflow runtime stub for Phase 3
+  telemetry-service/    telemetry ingestion and normalization service
+  workflow-runtime/     workflow runtime stub
   common-lib/           shared domain contracts
 ai-engine-python/
   embeddings/           sentence-transformer embeddings
   retrieval/            OpenSearch memory and Neo4j graph storage
   rca_engine/           RCA generation
-  langgraph_workflows/  Phase 3 LangGraph workflows
+  langgraph_workflows/  workflow stubs
+frontend/
+  dashboard/            React + TypeScript + Tailwind dashboard
 infra/
   docker/               local Compose stack and Dockerfiles
   otel/                 OpenTelemetry Collector config
-  kubernetes/           starter K8s manifests
+  kubernetes/           starter Kubernetes manifests
   helm/                 chart placeholder
-frontend/
-  dashboard/            React + TypeScript + Tailwind dashboard
-docs/                   architecture, API, roadmap
+docs/                   architecture, API, roadmap, telemetry notes
 ```
 
-## Run Locally
+## Install And Run
 
-Start dependencies and services:
+### Option 1: Full Stack With Docker
+
+This is the easiest way to run the whole project.
 
 ```bash
 docker compose -f infra/docker/docker-compose.yml up --build
 ```
 
-## Production Hosting
+That starts:
 
-GitHub Pages hosts only the static React dashboard. The Java/Python backend services need a separate HTTPS host, such as a VPS running Docker Compose.
+- PostgreSQL on `5432`
+- OpenSearch on `9200`
+- Neo4j on `7687`
+- AI engine on `8000`
+- API gateway on `8080`
+- telemetry service on `8081`
+- OpenTelemetry Collector on `4317` / `4318`
 
-On a VPS, point a DNS record such as `api.example.com` to the server, copy this repository to the server, create a production env file, and start the backend stack:
+Open the dashboard in a separate terminal:
+
+```bash
+cd frontend/dashboard
+npm install
+npm run dev
+```
+
+Then visit:
+
+- dashboard: `http://localhost:5174`
+- API gateway Swagger UI: `http://localhost:8080/swagger-ui.html`
+- AI engine docs: `http://localhost:8000/docs`
+- telemetry service health: `http://localhost:8081/actuator/health`
+
+### Option 2: Local Development Without Docker
+
+Use this if you want to work on one layer at a time.
+
+Prerequisites:
+
+- Node.js 18+ for the dashboard
+- Java 21+ for the Spring services
+- Python 3.12+ and `uv` for the AI engine
+- PostgreSQL, OpenSearch, and Neo4j available locally or through Docker
+
+Run the AI engine:
+
+```bash
+cd ai-engine-python
+uv sync
+uv run uvicorn main:app --reload --port 8000
+```
+
+Run the API gateway:
+
+```bash
+./gradlew :backend-java:api-gateway:bootRun
+```
+
+Run the telemetry service:
+
+```bash
+./gradlew :backend-java:telemetry-service:bootRun
+```
+
+Run the dashboard:
+
+```bash
+cd frontend/dashboard
+npm install
+npm run dev
+```
+
+## Configuration
+
+Copy the example environment file before running the stack locally or in production:
 
 ```bash
 cp .env.example .env
-# edit .env with strong passwords and BACKEND_DOMAIN=api.example.com
-docker compose --env-file .env -f infra/docker/docker-compose.prod.yml up -d --build
 ```
 
-The production Compose file uses Caddy for HTTPS and routes:
+Important values from `.env.example`:
 
-- `https://api.example.com/api/*` to the API gateway
-- `https://api.example.com/api/v1/telemetry*` to the telemetry service
+- `POSTGRES_R2DBC_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- `AI_ENGINE_BASE_URL`
+- `AEGIS_ALLOWED_ORIGINS`
+- `AEGIS_OPENSEARCH_URL`
+- `AEGIS_NEO4J_URI`, `AEGIS_NEO4J_USER`, `AEGIS_NEO4J_PASSWORD`
+- `AEGIS_USE_OLLAMA`, `AEGIS_OLLAMA_URL`, `AEGIS_OLLAMA_MODEL`
+- `VITE_API_BASE_URL`, `VITE_TELEMETRY_API_BASE_URL` for the dashboard build
 
-Set these GitHub repository variables before rebuilding GitHub Pages:
+If you enable Ollama, the AI engine will try to use it for generated RCA text. If it is disabled or unavailable, the engine still returns an RCA from the live incident context and retrieved memory.
 
-```bash
-gh variable set VITE_API_BASE_URL --body https://api.example.com
-gh variable set VITE_TELEMETRY_API_BASE_URL --body https://api.example.com
-```
+## How To Use It
 
-The backend CORS default allows `https://tanvisaxena1901.github.io`. Override it with `AEGIS_ALLOWED_ORIGINS` if you add more frontend origins.
+1. Open the dashboard.
+2. Load or select an incident.
+3. Run RCA to see likely cause, evidence, and remediation.
+4. Search memory to find related historical incidents.
+5. Build the graph to inspect service and signal lineage.
+6. Replay reasoning to inspect how the answer was assembled.
+7. Use the synthetic incident flow to seed test data and drive the platform end to end.
 
-API gateway:
-
-- OpenAPI UI: `http://localhost:8080/swagger-ui.html`
-- health: `http://localhost:8080/actuator/health`
-
-AI engine:
-
-- docs: `http://localhost:8000/docs`
-- health: `http://localhost:8000/health`
-
-Telemetry service:
-
-- health: `http://localhost:8081/actuator/health`
-- normalized telemetry: `POST http://localhost:8081/api/v1/telemetry`
-- OTLP HTTP metrics: `POST http://localhost:8081/v1/metrics`
-- OTLP HTTP logs: `POST http://localhost:8081/v1/logs`
-- OTLP HTTP traces: `POST http://localhost:8081/v1/traces`
-- recent telemetry: `http://localhost:8081/api/v1/telemetry/recent`
-
-OpenTelemetry Collector:
-
-- OTLP gRPC receiver: `localhost:4317`
-- OTLP HTTP receiver: `localhost:4318`
-
-## Synthetic Incident Traffic
-
-For a realistic demo loop, use the synthetic incident API to generate incident-shaped payloads, then use k6 to drive telemetry ingestion, incident creation, RCA requests, memory searches, and causality graph builds.
-
-This uses the open-source k6 CLI Docker image only. No k6 Cloud account or Grafana Cloud account is required.
-
-Generate one synthetic workflow payload directly:
-
-```bash
-curl 'http://localhost:8080/api/v1/synthetic/incidents/next?tenantId=synthetic&profile=incident-management'
-```
-
-Start the backend plus Prometheus and Grafana:
-
-```bash
-docker compose -f infra/docker/docker-compose.yml --profile observability up --build
-```
-
-Then run the synthetic incident stream in another terminal:
-
-```bash
-docker compose -f infra/docker/docker-compose.yml --profile synthetic run --rm synthetic-incidents
-```
-
-Useful local URLs:
-
-- dashboard: `http://localhost:5174`
-- API gateway metrics: `http://localhost:8080/actuator/prometheus`
-- telemetry service metrics: `http://localhost:8081/actuator/prometheus`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000` (`admin` / `admin` by default)
-- recent telemetry: `http://localhost:8081/api/v1/telemetry/recent`
-
-Tune the generator with env vars:
-
-```bash
-SYNTHETIC_VUS=8 SYNTHETIC_DURATION=15m SYNTHETIC_INCIDENT_RATE=0.5 \
-  docker compose -f infra/docker/docker-compose.yml --profile synthetic run --rm synthetic-incidents
-```
-
-To seed historical memory before live simulation, call:
-
-```bash
-curl -X POST 'http://localhost:8080/api/v1/memory/synthetic-dataset?count=60'
-```
-
-The generated traffic is intentionally incident-shaped: the API produces noisy metric samples and workflow payloads, while k6 stores incidents, indexes memory, asks for RCA, and builds causality graphs. Prometheus/Grafana observe service health; k6 drives the incident workflow.
-
-## OpenTelemetry Demo As Signal Source
-
-For more realistic telemetry, run the official OpenTelemetry Demo application and export its OTLP data into the AEGIS collector. This gives you live service metrics, traces, and logs from a real microservice demo instead of template-only traffic.
-
-Start AEGIS with observability:
-
-```bash
-docker compose -f infra/docker/docker-compose.yml --profile observability up --build
-```
-
-The AEGIS collector listens on:
-
-- OTLP gRPC: `localhost:4317`
-- OTLP HTTP: `localhost:4318`
-- Prometheus exporter for received OTel metrics: `localhost:9464`
-
-Run the OpenTelemetry Demo in a separate checkout and add AEGIS as an extra OTLP backend in the demo collector config:
-
-```bash
-git clone https://github.com/open-telemetry/opentelemetry-demo.git ../opentelemetry-demo
-cd ../opentelemetry-demo
-```
-
-Edit `src/otel-collector/otelcol-config-extras.yml` in the demo checkout:
-
-```yaml
-exporters:
-  otlp/aegis:
-    endpoint: host.docker.internal:4317
-    tls:
-      insecure: true
-
-service:
-  pipelines:
-    traces:
-      exporters: [otlp/aegis]
-    metrics:
-      exporters: [otlp/aegis]
-    logs:
-      exporters: [otlp/aegis]
-```
-
-Then start the demo:
-
-```bash
-docker compose -f docker-compose.minimal.yml up --force-recreate --remove-orphans --detach
-```
-
-Prometheus will scrape the AEGIS collector's Prometheus exporter at `otel-collector:9464`, so OpenTelemetry Demo metrics become visible at `http://localhost:9090` and in Grafana at `http://localhost:3000`.
-
-## Example Incident
+Useful API examples:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/incidents \
@@ -226,124 +199,97 @@ curl -X POST http://localhost:8080/api/v1/incidents \
   }'
 ```
 
-Semantic retrieval:
-
 ```bash
 curl -X POST http://localhost:8080/api/v1/memory/search \
   -H 'Content-Type: application/json' \
   -d '{
-    "query":"payment timeout after deployment",
-    "service":"payment-service",
-    "tenantId":"tenant-1",
-    "teamId":"payments",
-    "requestedBy":"operator-1",
-    "role":"responder",
-    "severity":"HIGH",
-    "limit":5,
-    "telemetry":{"redis_latency_ms":900,"error_rate":0.2},
-    "memoryTypes":["episodic","semantic","procedural"]
+    "query": "payment timeout after deployment",
+    "service": "payment-service",
+    "tenantId": "tenant-1",
+    "teamId": "payments",
+    "requestedBy": "operator-1",
+    "role": "responder",
+    "severity": "HIGH",
+    "limit": 5,
+    "telemetry": {"redis_latency_ms": 900, "error_rate": 0.2},
+    "memoryTypes": ["episodic", "semantic", "procedural"]
   }'
 ```
-
-RCA:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/rca \
   -H 'Content-Type: application/json' \
   -d '{
-    "incidentId":"INC-1001",
-    "query":"Redis latency after deployment",
-    "logs":["redis timeout after 500ms"],
-    "telemetry":{"redis_latency_ms":820}
+    "incidentId": "INC-1001",
+    "query": "Redis latency after deployment",
+    "logs": ["redis timeout after 500ms"],
+    "telemetry": {"redis_latency_ms": 820}
   }'
 ```
 
-Operator feedback:
+## Synthetic Traffic And Demo Flow
+
+AEGIS includes a synthetic incident pipeline so you can demo the platform without wiring a real production system.
+
+Generate a synthetic incident payload:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/memory/feedback \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "incidentId":"INC-1001",
-    "tenantId":"tenant-1",
-    "actorId":"operator-1",
-    "helpful":true,
-    "correctRca":true,
-    "remediationWorked":true,
-    "actionTaken":"rolled back payment-service v2.3"
-  }'
+curl 'http://localhost:8080/api/v1/synthetic/incidents/next?tenantId=synthetic&profile=incident-management'
 ```
 
-Incident similarity benchmark:
+Seed memory with synthetic historical incidents:
 
 ```bash
-curl http://localhost:8080/api/v1/benchmarks/incident-similarity
-```
-
-Graph RCA query:
-
-```bash
-curl 'http://localhost:8080/api/v1/graph/incidents?service=payment-service&rootCause=Redis%20saturation'
-```
-
-Build a telemetry causality graph:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/graph/causality \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "incidentId":"INC-1001",
-    "service":"payment-service",
-    "deploymentVersion":"v2.3",
-    "telemetry":{"redis_latency_ms":900,"error_rate":0.18,"p95_latency_ms":1800},
-    "logs":["redis timeout after 500ms","connection pool exhausted"],
-    "events":["Deploy v2.3 completed"]
-  }'
-```
-
-Operational AI-infra endpoints:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/memory/reembed
 curl -X POST 'http://localhost:8080/api/v1/memory/synthetic-dataset?count=60'
-curl http://localhost:8080/api/v1/evaluation/retrieval
-curl http://localhost:8080/api/v1/audit/events
-curl http://localhost:8080/api/v1/rag/traces
-curl http://localhost:8080/api/v1/reasoning/traces/{traceId}/replay
-curl http://localhost:8080/api/v1/postmortems/INC-1001?tenantId=tenant-1
-curl http://localhost:8080/api/v1/graph/insights?tenantId=tenant-1
 ```
 
-## Platform Integration
-
-AEGIS can call AI-Memory-Graph before generating an RCA:
-
-```text
-Aegis detects a Kubernetes issue
-  -> collects pod logs, events, rollout status, and telemetry
-  -> POST /api/v1/memory/search for similar historical incidents
-  -> combines current evidence and retrieved memory in the RCA workflow
-  -> shows root cause, evidence, and remediation with feedback controls
-```
-
-## Example Telemetry
+Run the synthetic incident stream:
 
 ```bash
-curl -X POST http://localhost:8081/api/v1/telemetry \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "service": "payment-service",
-    "source": "otel-collector",
-    "values": {
-      "p95_latency_ms": 1840,
-      "error_rate": 18,
-      "redis_latency_ms": 820
-    }
-  }'
+docker compose -f infra/docker/docker-compose.yml --profile synthetic run --rm synthetic-incidents
 ```
 
-OpenTelemetry Collector config lives at `infra/otel/otel-collector-config.yaml`.
+If you also want observability:
 
-## Phase Roadmap
+```bash
+docker compose -f infra/docker/docker-compose.yml --profile observability up --build
+```
 
-Phase 1 is implemented as the MVP foundation. Phase 2 adds Kubernetes watchers, Fluent Bit/OpenTelemetry ingestion, and deployment intelligence. Phase 3 adds LangGraph orchestration, retries, and workflow persistence. Phase 4 adds anomaly detection, remediation planning, and graph traversal intelligence.
+Useful observability URLs:
+
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+- API gateway metrics: `http://localhost:8080/actuator/prometheus`
+- telemetry service metrics: `http://localhost:8081/actuator/prometheus`
+- recent telemetry: `http://localhost:8081/api/v1/telemetry/recent`
+
+## Production Hosting
+
+The dashboard can be hosted statically, but the backend stack needs a real host.
+
+The production Compose file in `infra/docker/docker-compose.prod.yml` uses Caddy for HTTPS and routes:
+
+- `/api/*` to the API gateway
+- `/api/v1/telemetry*` to the telemetry service
+
+Before publishing the dashboard, set the frontend build variables:
+
+```bash
+gh variable set VITE_API_BASE_URL --body https://api.example.com
+gh variable set VITE_TELEMETRY_API_BASE_URL --body https://api.example.com
+```
+
+## Why This Project Is Useful
+
+- It shortens triage by bringing memory, telemetry, and graph context into one place.
+- It makes RCA explanations auditable instead of opaque.
+- It lets teams compare a live incident against known failure patterns.
+- It supports synthetic testing, so you can validate workflows without waiting for production traffic.
+- It gives you a single workflow from detection to remediation, instead of separate tools for search, graphs, and postmortems.
+
+## Further Reading
+
+- [Architecture notes](docs/architecture.md)
+- [API reference](docs/api.md)
+- [Telemetry guide](docs/telemetry.md)
+- [Roadmap](docs/roadmap.md)
