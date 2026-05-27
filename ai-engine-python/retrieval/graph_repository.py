@@ -440,12 +440,15 @@ class GraphRepository:
         return "MEDIUM"
 
     def _build_driver(self):
+        if settings.neo4j_uri.lower() in {"disabled", "none", "off"}:
+            return None
         try:
             from neo4j import GraphDatabase
 
             driver = GraphDatabase.driver(
                 settings.neo4j_uri,
                 auth=(settings.neo4j_user, settings.neo4j_password),
+                connection_timeout=2,
             )
             driver.verify_connectivity()
             return driver

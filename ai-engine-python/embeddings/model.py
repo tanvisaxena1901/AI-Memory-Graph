@@ -14,7 +14,7 @@ class EmbeddingModel:
 
     def encode(self, text: str) -> list[float]:
         model = self._load_model()
-        if model is None:
+        if not model:
             return self._stable_fallback_embedding(text)
         vector = model.encode(text, normalize_embeddings=True)
         return vector.astype(float).tolist()
@@ -22,6 +22,9 @@ class EmbeddingModel:
     def _load_model(self):
         if self._model is not None:
             return self._model
+        if settings.embedding_model.lower() in {"hash", "stable-hash", "fallback"}:
+            self._model = False
+            return None
         try:
             from sentence_transformers import SentenceTransformer
 

@@ -8,7 +8,6 @@ import {
   Bell,
   Bot,
   CheckCircle2,
-  ChevronRight,
   Database,
   Gauge,
   GitBranch,
@@ -22,7 +21,6 @@ import {
   Server,
   ShieldCheck,
   Sparkles,
-  TerminalSquare,
   UserRound
 } from "lucide-react";
 import { apiUrl, telemetryApiUrl } from "./config";
@@ -76,6 +74,68 @@ type RemoteMemory = {
   remediation?: string[];
   telemetrySignals?: Record<string, number | string>;
   rankingSignals?: Record<string, number>;
+};
+
+type SyntheticIncidentPayload = {
+  incidentId: string;
+  tenantId: string;
+  profile: string;
+  telemetryEvent: {
+    service: string;
+    source: string;
+    timestamp: string;
+    values: Record<string, number | string>;
+    deploymentVersion: string;
+  };
+  incident: Omit<Incident, "status"> & {
+    tenantId: string;
+    teamId: string;
+    serviceOwner: string;
+    rootCause: string;
+    remediation: string[];
+    successfulRemediation: boolean;
+    aiConfidence: number;
+    humanConfirmed: boolean;
+    runbookRef: string;
+  };
+  rca: {
+    incidentId: string;
+    tenantId: string;
+    teamId: string;
+    requestedBy: string;
+    role: string;
+    query: string;
+    logs: string[];
+    telemetry: Record<string, number | string>;
+  };
+  memorySearch: {
+    query: string;
+    tenantId: string;
+    teamId: string;
+    requestedBy: string;
+    role: string;
+    service: string;
+    severity: Severity;
+    limit: number;
+    telemetry: Record<string, number | string>;
+    memoryTypes: string[];
+  };
+  causality: {
+    incidentId: string;
+    tenantId: string;
+    service: string;
+    deploymentVersion: string;
+    telemetry: Record<string, number | string>;
+    logs: string[];
+    events: string[];
+    timestamp: string;
+  };
+};
+
+type SyntheticDatasetReport = {
+  status: string;
+  generated: number;
+  clusters: Record<string, number>;
 };
 
 type MetricSample = {
@@ -140,147 +200,49 @@ type ReasoningReplay = {
 
 const initialIncidents: Incident[] = [
   {
-    incidentId: "INC-1001",
-    service: "payment-service",
-    severity: "HIGH",
-    summary: "Redis connection saturation after v2.3 deployment",
-    deploymentVersion: "v2.3",
-    timestamp: "2026-05-18T08:24:00.000Z",
-    logs: ["redis timeout after 500ms", "connection pool exhausted", "payment retries increased"],
-    telemetry: { redis_latency_ms: 820, error_rate: "18%", consumer_lag: 1480 },
-    status: "Investigating"
-  },
-  {
-    incidentId: "INC-1002",
-    service: "checkout-api",
-    severity: "MEDIUM",
-    summary: "API timeout chain from consumer lag",
-    deploymentVersion: "v4.8",
-    timestamp: "2026-05-18T07:52:00.000Z",
-    logs: ["p95 latency crossed 2200ms", "orders topic lag rising"],
-    telemetry: { p95_latency_ms: 2260, error_rate: "7%", lag: 3900 },
-    status: "RCA ready"
-  },
-  {
-    incidentId: "INC-1003",
-    service: "inventory-worker",
-    severity: "CRITICAL",
-    summary: "CrashLoopBackOff after memory spike during sync job",
-    deploymentVersion: "v1.14",
-    timestamp: "2026-05-18T06:30:00.000Z",
-    logs: ["OOMKilled exit code 137", "heap allocation increased after sync start"],
-    telemetry: { restart_count: 9, memory_percent: "96%", queue_depth: 720 },
+    incidentId: "SYN-LOADING",
+    service: "synthetic-api",
+    severity: "LOW",
+    summary: "Loading synthetic incident from API",
+    deploymentVersion: "pending",
+    timestamp: new Date().toISOString(),
+    logs: ["Waiting for /api/v1/synthetic/incidents/next"],
+    telemetry: {},
     status: "Investigating"
   }
 ];
 
-const graphNodes: GraphNode[] = [
-  {
-    id: "deploy",
-    label: "Deploy v2.3",
-    kind: "deploy",
-    x: 92,
-    y: 82,
-    detail: "payment-service rollout started 18 minutes before the Redis incident."
-  },
-  {
-    id: "service",
-    label: "payment-service",
-    kind: "service",
-    x: 250,
-    y: 82,
-    detail: "High retry pressure and elevated latency on checkout dependency calls."
-  },
-  {
-    id: "metric",
-    label: "Redis latency",
-    kind: "metric",
-    x: 250,
-    y: 214,
-    detail: "Latency crossed 820ms with connection pool saturation."
-  },
-  {
-    id: "fault",
-    label: "API timeout",
-    kind: "fault",
-    x: 415,
-    y: 150,
-    detail: "Timeouts propagated to checkout and order confirmation APIs."
-  },
-  {
-    id: "incident",
-    label: "INC-1001",
-    kind: "incident",
-    x: 415,
-    y: 282,
-    detail: "Current investigation combines telemetry, memory matches, and deployment context."
-  }
-];
+const initialGraphNode: GraphNode = {
+  id: "graph:synthetic-loading",
+  label: "Awaiting graph",
+  kind: "incident",
+  x: 250,
+  y: 160,
+  detail: "Fetch synthetic data or build the causality graph to load API graph data."
+};
 
 const initialCausalityGraph: CausalityGraphData = {
-  incidentId: "INC-1001",
-  tenantId: "default",
-  nodes: graphNodes.map(({ x: _x, y: _y, ...node }) => node),
-  edges: [
-    { source: "deploy", target: "service", relationship: "CHANGED", weight: 0.78, evidence: ["deploymentVersion=v2.3"] },
-    { source: "service", target: "metric", relationship: "SATURATED", weight: 0.88, evidence: ["redis_latency_ms=820"] },
-    { source: "metric", target: "fault", relationship: "PROPAGATED_TO", weight: 0.82, evidence: ["checkout API timeout"] },
-    { source: "fault", target: "incident", relationship: "CAUSED", weight: 0.9, evidence: ["error_rate=18%"] }
+  incidentId: "SYN-LOADING",
+  tenantId: "synthetic",
+  nodes: [
+    {
+      id: initialGraphNode.id,
+      label: initialGraphNode.label,
+      kind: initialGraphNode.kind,
+      detail: initialGraphNode.detail
+    }
   ],
-  blastRadius: ["payment-service", "checkout-api", "order-confirmation"],
-  recurringPatterns: ["redis-saturation", "api-degradation"],
-  reasoningSummary: "Deployment and Redis saturation signals propagated into API timeouts for INC-1001."
+  edges: [],
+  blastRadius: [],
+  recurringPatterns: [],
+  reasoningSummary: "No local demo graph is loaded. Use Build Graph to call the causality API."
 };
 
 const initialReasoningReplay: ReasoningReplay = {
-  traceId: "trace-local-demo",
-  workflowPath: ["QUERY_EMBEDDING", "MEMORY_RETRIEVAL", "GRAPH_CAUSALITY", "RCA_GENERATION"],
-  summary: "Local replay shows how AEGIS combines memory retrieval, graph traversal, and RCA generation.",
-  events: [
-    {
-      eventId: "evt-local-1",
-      traceId: "trace-local-demo",
-      timestamp: new Date().toISOString(),
-      step: "QUERY_EMBEDDING",
-      detail: "Encoded the incident query using the configured embedding model.",
-      inputs: { query: "Redis latency after deployment" },
-      outputs: { embeddingModel: "sentence-transformers/all-MiniLM-L6-v2" },
-      durationMs: 12
-    },
-    {
-      eventId: "evt-local-2",
-      traceId: "trace-local-demo",
-      timestamp: new Date().toISOString(),
-      step: "MEMORY_RETRIEVAL",
-      detail: "Retrieved historical Redis pool exhaustion and runbook memories.",
-      inputs: { service: "payment-service" },
-      outputs: { retrievedIncidentIds: ["INC-BENCH-REDIS-POOL", "RUNBOOK-REDIS-POOL"] },
-      durationMs: 24,
-      parentEventId: "evt-local-1"
-    },
-    {
-      eventId: "evt-local-3",
-      traceId: "trace-local-demo",
-      timestamp: new Date().toISOString(),
-      step: "GRAPH_CAUSALITY",
-      detail: "Linked deployment, Redis saturation, and API timeout nodes.",
-      inputs: { telemetryKeys: ["redis_latency_ms", "error_rate"] },
-      outputs: { nodes: 5, edges: 4 },
-      durationMs: 18,
-      parentEventId: "evt-local-2"
-    },
-    {
-      eventId: "evt-local-4",
-      traceId: "trace-local-demo",
-      timestamp: new Date().toISOString(),
-      step: "RCA_GENERATION",
-      detail: "Generated RCA from retrieved memory and graph context.",
-      inputs: { incidentId: "INC-1001" },
-      outputs: { likelyRootCause: "Redis connection saturation after deployment." },
-      durationMs: 42,
-      parentEventId: "evt-local-3"
-    }
-  ]
+  traceId: "trace-awaiting-api",
+  workflowPath: [],
+  summary: "No reasoning replay has been loaded yet. Generate RCA to request a trace from the API.",
+  events: []
 };
 
 const workflowSteps = [
@@ -315,13 +277,20 @@ function App() {
   const [activeView, setActiveView] = useState<View>("metrics");
   const [incidents, setIncidents] = useState(initialIncidents);
   const [metricSamples, setMetricSamples] = useState(initialMetricSamples);
+  const [currentSyntheticPayload, setCurrentSyntheticPayload] = useState<SyntheticIncidentPayload | null>(null);
+  const [syntheticDatasetReport, setSyntheticDatasetReport] = useState<SyntheticDatasetReport | null>(null);
   const [selectedId, setSelectedId] = useState(initialIncidents[0].incidentId);
   const [query, setQuery] = useState("Redis latency after deployment");
   const [serviceFilter, setServiceFilter] = useState("all");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [rca, setRca] = useState<RcaResult>(() => buildLocalRca(initialIncidents[0], []));
-  const [status, setStatus] = useState("Dashboard running in local memory mode");
-  const [selectedGraphNode, setSelectedGraphNode] = useState(graphNodes[0]);
+  const [rca, setRca] = useState<RcaResult>({
+    summary: "Synthetic RCA has not been generated yet.",
+    likelyRootCause: "Fetch synthetic data, then run RCA to call the AI engine.",
+    evidence: [],
+    remediation: ["Run RCA from the investigation context panel."]
+  });
+  const [status, setStatus] = useState("Dashboard loading synthetic data from API");
+  const [selectedGraphNode, setSelectedGraphNode] = useState(initialGraphNode);
   const [causalityGraph, setCausalityGraph] = useState<CausalityGraphData>(initialCausalityGraph);
   const [reasoningReplay, setReasoningReplay] = useState<ReasoningReplay>(initialReasoningReplay);
   const [workflowRunning, setWorkflowRunning] = useState(false);
@@ -362,10 +331,15 @@ function App() {
         tone: "red"
       },
       { label: "Metric samples", value: metricSamples.length.toString(), icon: <BarChart3 size={18} />, tone: "blue" },
-      { label: "Graph edges", value: causalityGraph.edges.length.toString(), icon: <GitBranch size={18} />, tone: "amber" }
+      { label: "Memory hits", value: searchResults.length.toString(), icon: <Database size={18} />, tone: "amber" }
     ],
-    [causalityGraph.edges.length, incidents, metricSamples.length, services.length]
+    [incidents, metricSamples.length, searchResults.length, services.length]
   );
+
+  useEffect(() => {
+    void loadSyntheticWorkflow();
+    void seedSyntheticDataset(60);
+  }, []);
 
   useEffect(() => {
     if (!workflowRunning) {
@@ -399,46 +373,124 @@ function App() {
 
   function selectIncident(incident: Incident) {
     setSelectedId(incident.incidentId);
-    setRca(buildLocalRca(incident, searchResults));
+    setRca({
+      summary: "RCA has not been generated for this selected incident yet.",
+      likelyRootCause: "Run RCA to call the AI engine with this incident context.",
+      evidence: incident.logs.slice(0, 3),
+      remediation: ["Run RCA from the investigation context panel."]
+    });
     setStatus(`${incident.incidentId} selected for investigation`);
+  }
+
+  async function loadSyntheticWorkflow() {
+    try {
+      const response = await fetch(apiUrl("/api/v1/synthetic/incidents/next?tenantId=synthetic&profile=incident-management"));
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as SyntheticIncidentPayload;
+      const incident = mapSyntheticPayloadIncident(payload);
+      setCurrentSyntheticPayload(payload);
+      setIncidents((current) => [incident, ...current.filter((item) => item.incidentId !== incident.incidentId)]);
+      setSelectedId(incident.incidentId);
+      setCollector({
+        service: payload.telemetryEvent.service,
+        source: payload.telemetryEvent.source,
+        metrics: formatTelemetryInput(payload.telemetryEvent.values)
+      });
+      const previewGraph = buildSyntheticGraphPreview(payload);
+      setCausalityGraph(previewGraph);
+      setSelectedGraphNode(previewGraph.nodes[0] ? { ...previewGraph.nodes[0], x: 0, y: 0 } : initialGraphNode);
+      setQuery(payload.memorySearch.query);
+      setSearchResults([]);
+      setRca({
+        summary: `Synthetic workflow loaded from ${payload.profile}.`,
+        likelyRootCause: payload.incident.rootCause,
+        evidence: payload.incident.logs,
+        remediation: payload.incident.remediation
+      });
+      setStatus(`Loaded synthetic workflow ${payload.incidentId}`);
+    } catch (error) {
+      setStatus(`Synthetic API unavailable: ${errorMessage(error)}`);
+    }
+  }
+
+  async function seedSyntheticDataset(count: number) {
+    try {
+      const response = await fetch(apiUrl(`/api/v1/memory/synthetic-dataset?count=${count}`), {
+        method: "POST"
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      setSyntheticDatasetReport((await response.json()) as SyntheticDatasetReport);
+    } catch (error) {
+      setStatus(`Synthetic dataset seed failed: ${errorMessage(error)}`);
+    }
   }
 
   async function runSearch() {
     const selectedTelemetry = selectedIncident.telemetry;
+    const syntheticSearch =
+      currentSyntheticPayload?.incidentId === selectedIncident.incidentId
+        ? currentSyntheticPayload.memorySearch
+        : null;
     try {
       const response = await fetch(apiUrl("/api/v1/memory/search"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query,
-          tenantId: "default",
-          requestedBy: "dashboard",
+          ...(syntheticSearch ?? {
+            query,
+            tenantId: "synthetic",
+            teamId: "dashboard",
+            requestedBy: "dashboard",
+            role: "platform-admin",
+            service: serviceFilter === "all" ? selectedIncident.service : serviceFilter,
+            severity: selectedIncident.severity,
+            limit: 6,
+            telemetry: selectedTelemetry,
+            memoryTypes: ["episodic", "semantic", "procedural"]
+          }),
           role: "platform-admin",
-          service: serviceFilter === "all" ? selectedIncident.service : serviceFilter,
-          severity: selectedIncident.severity,
-          limit: 6,
-          telemetry: selectedTelemetry,
-          memoryTypes: ["episodic", "semantic", "procedural"]
+          limit: 6
         })
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
       const remote = (await response.json()) as RemoteMemory[];
-      const mapped = remote.map(mapRemoteMemory);
+      let mapped = remote.map(mapRemoteMemory);
+      if (mapped.length === 0 && (syntheticSearch?.service || selectedIncident.service)) {
+        const broadResponse = await fetch(apiUrl("/api/v1/memory/search"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: syntheticSearch?.query ?? query,
+            tenantId: "synthetic",
+            teamId: syntheticSearch?.teamId ?? "dashboard",
+            requestedBy: "dashboard",
+            role: "platform-admin",
+            service: null,
+            severity: selectedIncident.severity,
+            limit: 6,
+            telemetry: selectedTelemetry,
+            memoryTypes: ["episodic", "semantic", "procedural"]
+          })
+        });
+        if (!broadResponse.ok) {
+          throw new Error(`HTTP ${broadResponse.status}`);
+        }
+        mapped = ((await broadResponse.json()) as RemoteMemory[]).map(mapRemoteMemory);
+      }
       setSearchResults(mapped);
       setActiveView("memory");
-      setStatus(`Semantic vector retrieval returned ${mapped.length} memories`);
+      setStatus(`API retrieval returned ${mapped.length} memories for ${selectedIncident.incidentId}`);
       return;
-    } catch {
-      const ranked = incidents
-        .map((incident) => scoreIncident(incident, query))
-        .filter((result) => result.score > 0)
-        .sort((a, b) => b.score - a.score);
-      const finalResults = ranked.length > 0 ? ranked : incidents.map((incident) => ({ ...incident, score: 0.42, reason: "fallback memory candidate" }));
-      setSearchResults(finalResults);
+    } catch (error) {
+      setSearchResults([]);
       setActiveView("memory");
-      setStatus(`Local semantic retrieval returned ${finalResults.length} memory matches`);
+      setStatus(`Retrieval API failed: ${errorMessage(error)}`);
     }
   }
 
@@ -464,9 +516,11 @@ function App() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      setStatus(`${sample.id} collected through telemetry service`);
-    } catch {
-      setStatus(`${sample.id} collected locally because telemetry service is unavailable`);
+      const accepted = await response.json();
+      setStatus(`${sample.id} collected through telemetry service at ${new Date(accepted.acceptedAt).toLocaleTimeString()}`);
+    } catch (error) {
+      setStatus(`Collect metrics failed: ${errorMessage(error)}`);
+      return;
     }
 
     setMetricSamples((current) => [sample, ...current]);
@@ -489,19 +543,32 @@ function App() {
     };
     setIncidents((current) => [created, ...current]);
     setSelectedId(created.incidentId);
-    setRca(buildLocalRca(created, searchResults));
-    setStatus(`${created.incidentId} opened from ${sample.id}`);
+    setRca({
+      summary: "Incident opened from collected telemetry.",
+      likelyRootCause: "Run RCA to call the AI engine with this metric-derived incident.",
+      evidence: created.logs,
+      remediation: ["Run RCA from the investigation context panel."]
+    });
+    setStatus(`${sample.id} collected through telemetry service; ${created.incidentId} opened`);
     setActiveView("incidents");
   }
 
   async function generateRca() {
+    const syntheticRca =
+      currentSyntheticPayload?.incidentId === selectedIncident.incidentId
+        ? { ...currentSyntheticPayload.rca, requestedBy: "dashboard", role: "platform-admin" }
+        : null;
     try {
       const response = await fetch(apiUrl("/api/v1/rca"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(syntheticRca ?? {
           incidentId: selectedIncident.incidentId,
-          query: selectedIncident.summary,
+          tenantId: "synthetic",
+          teamId: "dashboard",
+          requestedBy: "dashboard",
+          role: "responder",
+          query: buildRcaQuery(selectedIncident, "What is happening, what is the likely root cause, and what should be fixed first?"),
           logs: selectedIncident.logs,
           telemetry: selectedIncident.telemetry
         })
@@ -515,9 +582,14 @@ function App() {
         await loadReasoningReplay(remote.traceId);
       }
       setStatus(`RCA generated by AI engine for ${selectedIncident.incidentId}`);
-    } catch {
-      setRca(buildLocalRca(selectedIncident, searchResults));
-      setStatus(`Local RCA generated for ${selectedIncident.incidentId}`);
+    } catch (error) {
+      setRca({
+        summary: "RCA API call failed.",
+        likelyRootCause: "No RCA generated because the API request failed.",
+        evidence: [errorMessage(error)],
+        remediation: ["Check the API gateway and AI engine logs, then retry Run RCA."]
+      });
+      setStatus(`RCA API failed: ${errorMessage(error)}`);
     }
     setIncidents((current) =>
       current.map((incident) =>
@@ -527,13 +599,17 @@ function App() {
   }
 
   async function buildCausalityGraph() {
+    const syntheticCausality =
+      currentSyntheticPayload?.incidentId === selectedIncident.incidentId
+        ? currentSyntheticPayload.causality
+        : null;
     try {
       const response = await fetch(apiUrl("/api/v1/graph/causality"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(syntheticCausality ?? {
           incidentId: selectedIncident.incidentId,
-          tenantId: "default",
+          tenantId: "synthetic",
           service: selectedIncident.service,
           deploymentVersion: selectedIncident.deploymentVersion,
           telemetry: selectedIncident.telemetry,
@@ -551,15 +627,12 @@ function App() {
       }
       const graph = normalizeCausalityGraph((await response.json()) as CausalityGraphData);
       setCausalityGraph(graph);
-      setSelectedGraphNode(graph.nodes[0] ? { ...graph.nodes[0], x: 0, y: 0 } : graphNodes[0]);
+      setSelectedGraphNode(graph.nodes[0] ? { ...graph.nodes[0], x: 0, y: 0 } : initialGraphNode);
       setActiveView("graph");
       setStatus(`Causality graph built for ${selectedIncident.incidentId}`);
-    } catch {
-      const local = buildLocalCausalityGraph(selectedIncident);
-      setCausalityGraph(local);
-      setSelectedGraphNode(local.nodes[0] ? { ...local.nodes[0], x: 0, y: 0 } : graphNodes[0]);
+    } catch (error) {
       setActiveView("graph");
-      setStatus(`Local causality graph built for ${selectedIncident.incidentId}`);
+      setStatus(`Graph API failed: ${errorMessage(error)}`);
     }
   }
 
@@ -594,14 +667,54 @@ function App() {
     setChatBusy(true);
 
     try {
+      if (isGreeting(question)) {
+        setChatMessages((current) => [
+          ...current,
+          {
+            id: `aegis-${Date.now()}`,
+            role: "aegis",
+            content: `Incident ${selectedIncident.incidentId} is active on ${selectedIncident.service} (${selectedIncident.deploymentVersion}). Current issue: ${selectedIncident.summary}. Ask about evidence, fix steps, blast radius, or similar incidents.`,
+            timestamp: new Date().toISOString()
+          }
+        ]);
+        setStatus(`RCA chat summarized ${selectedIncident.incidentId}`);
+        return;
+      }
+
+      if (asksForSimilarIncidents(question)) {
+        const similarIncidents = await fetchSimilarIncidents(selectedIncident, currentSyntheticPayload);
+        setChatMessages((current) => [
+          ...current,
+          {
+            id: `aegis-${Date.now()}`,
+            role: "aegis",
+            content: formatSimilarIncidentsAnswer(selectedIncident, similarIncidents),
+            timestamp: new Date().toISOString()
+          }
+        ]);
+        setStatus(`RCA chat retrieved similar incidents for ${selectedIncident.incidentId}`);
+        return;
+      }
+
+      const syntheticRca =
+        currentSyntheticPayload?.incidentId === selectedIncident.incidentId
+          ? { ...currentSyntheticPayload.rca, requestedBy: "dashboard", role: "platform-admin" }
+          : null;
       const response = await fetch(apiUrl("/api/v1/rca"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(syntheticRca ?? {
+            incidentId: selectedIncident.incidentId,
+            tenantId: "synthetic",
+            teamId: "dashboard",
+            requestedBy: "dashboard",
+            role: "responder",
+            logs: selectedIncident.logs,
+            telemetry: selectedIncident.telemetry
+          }),
           incidentId: selectedIncident.incidentId,
-          query: `${question}\nIncident: ${selectedIncident.summary}`,
-          logs: selectedIncident.logs,
-          telemetry: selectedIncident.telemetry
+          query: buildRcaQuery(selectedIncident, question),
         })
       });
       if (!response.ok) {
@@ -614,24 +727,22 @@ function App() {
         {
           id: `aegis-${Date.now()}`,
           role: "aegis",
-          content: formatRcaChatAnswer(question, remote),
+          content: formatRcaChatAnswer(question, selectedIncident, remote),
           timestamp: new Date().toISOString()
         }
       ]);
       setStatus(`RCA chat answered by AI engine for ${selectedIncident.incidentId}`);
-    } catch {
-      const local = buildLocalRca(selectedIncident, searchResults);
-      setRca(local);
+    } catch (error) {
       setChatMessages((current) => [
         ...current,
         {
           id: `aegis-${Date.now()}`,
           role: "aegis",
-          content: buildLocalChatAnswer(question, selectedIncident, local),
+          content: `RCA API failed: ${errorMessage(error)}`,
           timestamp: new Date().toISOString()
         }
       ]);
-      setStatus(`RCA chat answered locally for ${selectedIncident.incidentId}`);
+      setStatus(`RCA chat API failed for ${selectedIncident.incidentId}`);
     } finally {
       setChatBusy(false);
     }
@@ -695,13 +806,19 @@ function App() {
       <section className="mx-auto grid max-w-7xl gap-5 px-5 py-5 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-5">
           {activeView === "metrics" && (
-            <MetricCollectorPanel
-              collector={collector}
-              metricSamples={metricSamples}
-              setCollector={setCollector}
-              onCollect={collectMetricSample}
-              onOpenIncident={openIncidentFromMetrics}
-            />
+            <>
+              <SyntheticDataPanel
+                payload={currentSyntheticPayload}
+                report={syntheticDatasetReport}
+              />
+              <MetricCollectorPanel
+                collector={collector}
+                metricSamples={metricSamples}
+                setCollector={setCollector}
+                onCollect={collectMetricSample}
+                onOpenIncident={openIncidentFromMetrics}
+              />
+            </>
           )}
 
           {activeView === "incidents" && (
@@ -876,45 +993,6 @@ function App() {
             onAsk={askRcaAssistant}
             onInputChange={setChatInput}
           />
-
-          <Panel title="RCA Output" action={<StatusPill label={selectedIncident.status} compact />}>
-            <div className="space-y-4 p-4">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Likely root cause</div>
-                <p className="mt-2 text-sm leading-6 text-slate-700">{rca.likelyRootCause}</p>
-              </div>
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Evidence</div>
-                <div className="mt-2 space-y-2">
-                  {rca.evidence.map((item) => (
-                    <div key={item} className="rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">{item}</div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Remediation</div>
-                <div className="mt-2 space-y-2">
-                  {rca.remediation.map((item) => (
-                    <div key={item} className="flex gap-2 rounded border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                      <ChevronRight size={16} className="mt-0.5 shrink-0" />
-                      <span>{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title="Live Telemetry" action={<StatusPill label="Streaming" compact />}>
-            <div className="space-y-2 p-4">
-              {selectedIncident.logs.map((log, index) => (
-                <div key={`${log}-${index}`} className="flex items-start gap-2 rounded bg-graphite px-3 py-2 font-mono text-xs text-slate-100">
-                  <TerminalSquare size={14} className="mt-0.5 shrink-0 text-emerald-300" />
-                  <span>{log}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
         </div>
       </section>
     </main>
@@ -1188,6 +1266,26 @@ function MetricSampleRow(props: { sample: MetricSample; onOpenIncident: () => vo
   );
 }
 
+function SyntheticDataPanel(props: {
+  payload: SyntheticIncidentPayload | null;
+  report: SyntheticDatasetReport | null;
+}) {
+  return (
+    <Panel title="Synthetic Data Source">
+      <div className="grid gap-3 p-4">
+        <Detail label="Current incident" value={props.payload?.incidentId ?? "not loaded"} />
+        <Detail label="Service" value={props.payload?.incident.service ?? "not loaded"} />
+        <Detail label="Profile" value={props.payload?.profile ?? "not loaded"} />
+        <Detail label="Dataset status" value={props.report ? `${props.report.status}; generated ${props.report.generated}` : "not seeded"} />
+        <Detail
+          label="Dataset clusters"
+          value={props.report ? Object.entries(props.report.clusters).map(([name, count]) => `${name}:${count}`).join(", ") : "not seeded"}
+        />
+      </div>
+    </Panel>
+  );
+}
+
 function Input(props: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="grid gap-1 text-sm">
@@ -1367,6 +1465,30 @@ function GraphNodeView(props: { node: GraphNode; selected: boolean; onSelect: ()
   );
 }
 
+function mapSyntheticPayloadIncident(payload: SyntheticIncidentPayload): Incident {
+  return {
+    incidentId: payload.incident.incidentId,
+    service: payload.incident.service,
+    severity: payload.incident.severity,
+    summary: payload.incident.summary,
+    deploymentVersion: payload.incident.deploymentVersion,
+    timestamp: payload.incident.timestamp,
+    logs: payload.incident.logs,
+    telemetry: payload.incident.telemetry,
+    status: "Investigating"
+  };
+}
+
+function formatTelemetryInput(values: Record<string, number | string>): string {
+  return Object.entries(values)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(",");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function mapRemoteMemory(memory: RemoteMemory): SearchResult {
   const score = memory.rankScore || memory.score || memory.similarityScore || 0;
   return {
@@ -1406,107 +1528,56 @@ function normalizeCausalityGraph(graph: CausalityGraphData): CausalityGraphData 
   };
 }
 
-function buildLocalCausalityGraph(incident: Incident): CausalityGraphData {
-  const local = initialCausalityGraph;
-  const serviceId = `service:${incident.service}`;
-  const incidentId = `incident:${incident.incidentId}`;
-  const deploymentId = `deployment:${incident.service}:${incident.deploymentVersion}`;
-  const text = `${incident.summary} ${incident.logs.join(" ")}`.toLowerCase();
-  const signals: Array<Omit<GraphNode, "x" | "y">> = [];
-
-  if (text.includes("redis") || "redis_latency_ms" in incident.telemetry) {
-    signals.push({
-      id: `signal:${incident.service}:redis`,
-      label: "Redis saturation",
-      kind: "signal",
-      detail: "Redis latency or pool pressure detected from incident telemetry.",
-      service: incident.service,
-      score: 0.88
-    });
-  }
-  if (text.includes("oom") || text.includes("memory") || "restart_count" in incident.telemetry) {
-    signals.push({
-      id: `signal:${incident.service}:memory`,
-      label: "Memory pressure",
-      kind: "signal",
-      detail: "Memory pressure or restart signals detected.",
-      service: incident.service,
-      score: 0.9
-    });
-  }
-  if (text.includes("lag") || "consumer_lag" in incident.telemetry || "lag" in incident.telemetry) {
-    signals.push({
-      id: `signal:${incident.service}:lag`,
-      label: "Queue lag",
-      kind: "signal",
-      detail: "Consumer lag or queue backlog is part of the failure chain.",
-      service: incident.service,
-      score: 0.8
-    });
-  }
-  const activeSignals = signals.length ? signals : local.nodes.filter((node) => node.kind === "signal" || node.kind === "metric");
-  const nodes: CausalityGraphData["nodes"] = [
-    {
-      id: deploymentId,
-      label: `Deploy ${incident.deploymentVersion}`,
-      kind: "deployment",
-      service: incident.service,
-      detail: "Deployment marker used as the first causality checkpoint.",
-      score: 0.72
-    },
-    {
-      id: serviceId,
-      label: incident.service,
-      kind: "service",
-      service: incident.service,
-      detail: "Affected service under investigation.",
-      score: 0.8
-    },
-    ...activeSignals,
-    {
-      id: `fault:${incident.service}:impact`,
-      label: "User impact",
-      kind: "fault",
-      service: incident.service,
-      detail: "Customer-visible impact inferred from unhealthy signals.",
-      score: 0.82
-    },
-    {
-      id: incidentId,
-      label: incident.incidentId,
-      kind: "incident",
-      service: incident.service,
-      severity: incident.severity,
-      detail: incident.summary,
-      score: 1
-    }
-  ];
-  const edges: CausalityEdge[] = [
-    { source: deploymentId, target: serviceId, relationship: "CHANGED", weight: 0.75, evidence: [incident.deploymentVersion] },
-    ...activeSignals.map((signal) => ({
-      source: serviceId,
-      target: signal.id,
-      relationship: "EMITTED",
-      weight: signal.score ?? 0.75,
-      evidence: incident.logs.slice(0, 2)
-    })),
-    ...activeSignals.map((signal) => ({
-      source: signal.id,
-      target: `fault:${incident.service}:impact`,
-      relationship: "PROPAGATED_TO",
-      weight: signal.score ?? 0.75,
-      evidence: Object.entries(incident.telemetry).map(([key, value]) => `${key}=${value}`).slice(0, 2)
-    })),
-    { source: `fault:${incident.service}:impact`, target: incidentId, relationship: "CAUSED", weight: 0.9, evidence: [incident.summary] }
-  ];
+function buildSyntheticGraphPreview(payload: SyntheticIncidentPayload): CausalityGraphData {
   return {
-    incidentId: incident.incidentId,
-    tenantId: "default",
-    nodes,
-    edges,
-    blastRadius: [incident.service, `${incident.service}:downstream`],
-    recurringPatterns: activeSignals.map((signal) => signal.label.toLowerCase().replace(/\s+/g, "-")),
-    reasoningSummary: `Local graph linked ${activeSignals.length} telemetry signals to ${incident.incidentId}.`
+    incidentId: payload.incidentId,
+    tenantId: payload.tenantId,
+    nodes: [
+      {
+        id: `service:${payload.incident.service}`,
+        label: payload.incident.service,
+        kind: "service",
+        service: payload.incident.service,
+        detail: "Synthetic service from /api/v1/synthetic/incidents/next.",
+        score: 0.8
+      },
+      {
+        id: `deployment:${payload.incident.service}:${payload.incident.deploymentVersion}`,
+        label: `Deploy ${payload.incident.deploymentVersion}`,
+        kind: "deployment",
+        service: payload.incident.service,
+        detail: "Deployment marker supplied by the synthetic causality payload.",
+        score: 0.72
+      },
+      {
+        id: `incident:${payload.incidentId}`,
+        label: payload.incidentId,
+        kind: "incident",
+        service: payload.incident.service,
+        severity: payload.incident.severity,
+        detail: payload.incident.summary,
+        score: 1
+      }
+    ],
+    edges: [
+      {
+        source: `deployment:${payload.incident.service}:${payload.incident.deploymentVersion}`,
+        target: `service:${payload.incident.service}`,
+        relationship: "CHANGED",
+        weight: 0.78,
+        evidence: [payload.incident.deploymentVersion]
+      },
+      {
+        source: `service:${payload.incident.service}`,
+        target: `incident:${payload.incidentId}`,
+        relationship: "EXPERIENCED",
+        weight: 1,
+        evidence: [payload.incident.summary]
+      }
+    ],
+    blastRadius: [payload.incident.service],
+    recurringPatterns: [payload.incident.rootCause.toLowerCase().replace(/[^a-z0-9]+/g, "-")],
+    reasoningSummary: `Synthetic graph preview for ${payload.incidentId}. Use Build Graph to call the causality API.`
   };
 }
 
@@ -1526,78 +1597,113 @@ function scoreIncident(incident: Incident, query: string): SearchResult {
   };
 }
 
-function buildLocalRca(incident: Incident, matches: SearchResult[]): RcaResult {
-  const text = `${incident.summary} ${incident.logs.join(" ")}`.toLowerCase();
-  let likelyRootCause = "Recent runtime behavior changed for the affected service.";
-  let remediation = [
-    "Compare deployment configuration against the previous stable release.",
-    "Correlate logs, metrics and deployment events over the incident window.",
-    "Watch downstream timeout and retry pressure before closing the incident."
-  ];
-
-  if (text.includes("redis") || text.includes("connection")) {
-    likelyRootCause = "Connection pool saturation and backing store latency after deployment.";
-    remediation = [
-      "Inspect connection pool limits and Redis server latency.",
-      "Reduce retry pressure while the service stabilizes.",
-      "Rollback the deployment if timeout rate keeps increasing."
-    ];
-  }
-
-  if (text.includes("oom") || text.includes("memory") || text.includes("crashloop")) {
-    likelyRootCause = "Container memory pressure is causing repeated worker restarts.";
-    remediation = [
-      "Check heap sizing, pod limits and recent allocation changes.",
-      "Capture memory profile data before increasing limits permanently.",
-      "Pause or throttle the sync workload until restart rate drops."
-    ];
-  }
-
-  return {
-    summary: `AEGIS analyzed ${incident.service} telemetry with ${matches.length} retrieved memory candidates.`,
-    likelyRootCause,
-    evidence: [
-      ...incident.logs.slice(0, 3),
-      ...Object.entries(incident.telemetry).slice(0, 3).map(([key, value]) => `${key}=${value}`),
-      ...matches.slice(0, 2).map((match) => `similar ${match.incidentId}: ${match.summary}`)
-    ],
-    remediation
-  };
+function isGreeting(question: string): boolean {
+  const normalized = question.trim().toLowerCase();
+  return ["hi", "hello", "hey", "yo", "hola", "oho", "oho\\"].includes(normalized);
 }
 
-function formatRcaChatAnswer(question: string, rca: RcaResult): string {
-  const lowerQuestion = question.toLowerCase();
-  if (lowerQuestion.includes("evidence")) {
-    return `Evidence: ${rca.evidence.slice(0, 3).join("; ")}. Root cause: ${rca.likelyRootCause}`;
-  }
-  if (lowerQuestion.includes("first") || lowerQuestion.includes("remediation") || lowerQuestion.includes("do")) {
-    return `First action: ${rca.remediation[0] ?? "Correlate logs, metrics and deployment changes."} Then validate: ${rca.remediation.slice(1, 3).join("; ")}`;
-  }
-  if (lowerQuestion.includes("change") || lowerQuestion.includes("deploy")) {
-    return `Most relevant change signal: ${rca.summary} Check deployment/config drift before treating this as organic load growth.`;
-  }
-  return `Likely RCA: ${rca.likelyRootCause} Evidence: ${rca.evidence.slice(0, 2).join("; ")}. Recommended next step: ${rca.remediation[0]}`;
+function asksForSimilarIncidents(question: string): boolean {
+  const lower = question.toLowerCase();
+  return (
+    lower.includes("similar incident") ||
+    lower.includes("other incident") ||
+    lower.includes("past incident") ||
+    lower.includes("related incident") ||
+    lower.includes("anything similar")
+  );
 }
 
-function buildLocalChatAnswer(question: string, incident: Incident, rca: RcaResult): string {
-  const lowerQuestion = question.toLowerCase();
-  const telemetry = Object.entries(incident.telemetry)
-    .slice(0, 3)
+async function fetchSimilarIncidents(
+  incident: Incident,
+  syntheticPayload: SyntheticIncidentPayload | null
+): Promise<SearchResult[]> {
+  const syntheticSearch =
+    syntheticPayload?.incidentId === incident.incidentId
+      ? syntheticPayload.memorySearch
+      : null;
+  const response = await fetch(apiUrl("/api/v1/memory/search"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...(syntheticSearch ?? {
+        query: incident.summary,
+        tenantId: "synthetic",
+        teamId: "dashboard",
+        requestedBy: "dashboard",
+        role: "platform-admin",
+        service: incident.service,
+        severity: incident.severity,
+        limit: 3,
+        telemetry: incident.telemetry,
+        memoryTypes: ["episodic", "semantic", "procedural"]
+      }),
+      query: incident.summary,
+      role: "platform-admin",
+      limit: 3
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return ((await response.json()) as RemoteMemory[]).map(mapRemoteMemory);
+}
+
+function formatSimilarIncidentsAnswer(incident: Incident, similarIncidents: SearchResult[]): string {
+  if (!similarIncidents.length) {
+    return `No close historical matches were retrieved for ${incident.incidentId} on ${incident.service}. This looks like a currently isolated incident based on the available memory index.`;
+  }
+  return [
+    `Found ${similarIncidents.length} related incidents for ${incident.incidentId} on ${incident.service}:`,
+    ...similarIncidents.map((match) => `${match.incidentId}: ${match.summary} (${match.reason})`)
+  ].join(" ");
+}
+
+function buildRcaQuery(incident: Incident, question: string): string {
+  const telemetry = formatTelemetrySnapshot(incident.telemetry);
+  const signals = incident.logs.slice(0, 4).join("; ");
+  return [
+    `Operator question: ${question}`,
+    `Incident ID: ${incident.incidentId}`,
+    `Service: ${incident.service}`,
+    `Severity: ${incident.severity}`,
+    `Deployment: ${incident.deploymentVersion}`,
+    `Incident summary: ${incident.summary}`,
+    `Recent signals: ${signals || "none"}`,
+    `Telemetry snapshot: ${telemetry || "none"}`
+  ].join("\n");
+}
+
+function formatTelemetrySnapshot(telemetry: Record<string, number | string>): string {
+  return Object.entries(telemetry)
+    .slice(0, 4)
     .map(([key, value]) => `${key}=${value}`)
     .join(", ");
-  if (lowerQuestion.includes("blast") || lowerQuestion.includes("impact")) {
-    return `Impact is centered on ${incident.service}. Current telemetry (${telemetry}) suggests downstream calls and retries should be watched before declaring recovery.`;
+}
+
+function formatRcaChatAnswer(question: string, incident: Incident, rca: RcaResult): string {
+  const lowerQuestion = question.toLowerCase();
+  const telemetry = formatTelemetrySnapshot(incident.telemetry);
+  const where = `${incident.service} on ${incident.deploymentVersion}`;
+  const evidence = rca.evidence.slice(0, 3).join("; ");
+  const nextSteps = rca.remediation.slice(0, 3).join("; ");
+  const liveSummary = rca.summary || `Current issue: ${incident.summary}`;
+
+  if (lowerQuestion.includes("where") || lowerQuestion.includes("which service") || lowerQuestion.includes("which incident")) {
+    return `Incident ${incident.incidentId} is active on ${where}. ${liveSummary} Live telemetry: ${telemetry || "no telemetry snapshot available yet"}.`;
+  }
+  if (lowerQuestion.includes("fix") || lowerQuestion.includes("resolve") || lowerQuestion.includes("remediation") || lowerQuestion.includes("how")) {
+    return `Fix path for ${incident.incidentId} on ${where}: ${nextSteps}. Likely root cause: ${rca.likelyRootCause}.`;
   }
   if (lowerQuestion.includes("evidence")) {
-    return `The strongest evidence is ${rca.evidence.slice(0, 3).join("; ")}. This points to: ${rca.likelyRootCause}`;
+    return `Evidence for ${incident.incidentId}: ${evidence}. Likely root cause: ${rca.likelyRootCause}.`;
   }
-  if (lowerQuestion.includes("first") || lowerQuestion.includes("next") || lowerQuestion.includes("do")) {
-    return `Start with: ${rca.remediation[0]} Then continue with: ${rca.remediation.slice(1).join("; ")}`;
+  if (lowerQuestion.includes("first") || lowerQuestion.includes("remediation") || lowerQuestion.includes("do")) {
+    return `First action for ${incident.incidentId}: ${rca.remediation[0] ?? "Correlate logs, metrics and deployment changes."} Then continue with: ${rca.remediation.slice(1, 3).join("; ")}.`;
   }
   if (lowerQuestion.includes("change") || lowerQuestion.includes("deploy")) {
-    return `${incident.deploymentVersion} is the active deployment marker for this investigation. Compare it against the previous stable version and correlate the metric jump with rollout time.`;
+    return `Most relevant change context for ${incident.incidentId}: ${liveSummary} Check deployment and config drift on ${where} before treating this as organic load growth.`;
   }
-  return `For ${incident.incidentId}, the most likely root cause is: ${rca.likelyRootCause} Key telemetry: ${telemetry}.`;
+  return `${liveSummary} Likely root cause for ${incident.incidentId} on ${where}: ${rca.likelyRootCause}. Live evidence: ${evidence}. Recommended next steps: ${nextSteps}.`;
 }
 
 function parseTelemetry(value: string): Record<string, number | string> {

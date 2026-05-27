@@ -482,6 +482,8 @@ class IncidentMemoryStore:
             cluster, service, summary = categories[index % len(categories)]
             incident_id = f"SYN-{index + 1:04d}"
             if incident_id in self._fallback_docs:
+                existing_cluster = self._fallback_docs[incident_id].get("cluster", cluster)
+                cluster_counts[str(existing_cluster)] += 1
                 continue
             telemetry = self._synthetic_telemetry(cluster, index)
             doc = self._enrich_document(
@@ -511,7 +513,7 @@ class IncidentMemoryStore:
             generated += 1
             cluster_counts[cluster] += 1
         return SyntheticDatasetReport(
-            status="generated",
+            status="generated" if generated else "already-present",
             generated=generated,
             clusters=dict(cluster_counts),
         )
