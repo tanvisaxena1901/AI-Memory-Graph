@@ -773,7 +773,7 @@ function App() {
               <Radar size={22} />
             </div>
             <div>
-              <h1 className="text-xl font-semibold tracking-normal">AEGIS</h1>
+              <h1 className="text-xl font-semibold tracking-normal">AI MEMORY GRAPH - TELEMETRY ANALYSIS</h1>
               <p className="text-sm text-slate-500">Autonomous Execution, Graph Intelligence and Stateful Runtime</p>
             </div>
           </div>
