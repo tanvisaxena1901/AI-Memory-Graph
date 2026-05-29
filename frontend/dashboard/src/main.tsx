@@ -289,7 +289,7 @@ function App() {
     evidence: [],
     remediation: ["Run RCA from the investigation context panel."]
   });
-  const [status, setStatus] = useState("Dashboard loading synthetic data from API");
+  const [status, setStatus] = useState("AI-Memory Graph loading synthetic data from API");
   const [selectedGraphNode, setSelectedGraphNode] = useState(initialGraphNode);
   const [causalityGraph, setCausalityGraph] = useState<CausalityGraphData>(initialCausalityGraph);
   const [reasoningReplay, setReasoningReplay] = useState<ReasoningReplay>(initialReasoningReplay);
@@ -576,7 +576,7 @@ function App() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      const remote = (await response.json()) as RcaResult;
+      const remote = normalizeRcaResult((await response.json()) as RcaResult);
       setRca(remote);
       if (remote.traceId) {
         await loadReasoningReplay(remote.traceId);
@@ -642,10 +642,29 @@ function App() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      setReasoningReplay((await response.json()) as ReasoningReplay);
+      setReasoningReplay(normalizeReasoningReplay((await response.json()) as ReasoningReplay));
       setActiveView("reasoning");
-    } catch {
+      return true;
+    } catch (error) {
       setReasoningReplay(initialReasoningReplay);
+      setActiveView("reasoning");
+      setStatus(`Reasoning replay failed: ${errorMessage(error)}`);
+      return false;
+    }
+  }
+
+  async function openReasoningReplay() {
+    const traceId =
+      rca.traceId ??
+      (reasoningReplay.traceId !== initialReasoningReplay.traceId ? reasoningReplay.traceId : undefined);
+    setActiveView("reasoning");
+    if (!traceId) {
+      setStatus(`Generate RCA for ${selectedIncident.incidentId} before replaying the AI trace`);
+      return;
+    }
+    const loaded = await loadReasoningReplay(traceId);
+    if (loaded) {
+      setStatus(`Reasoning replay loaded for ${selectedIncident.incidentId}`);
     }
   }
 
@@ -720,7 +739,7 @@ function App() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      const remote = (await response.json()) as RcaResult;
+      const remote = normalizeRcaResult((await response.json()) as RcaResult);
       setRca(remote);
       setChatMessages((current) => [
         ...current,
@@ -764,47 +783,123 @@ function App() {
     setStatus(`Workflow queued for ${selectedIncident.incidentId}`);
   }
 
+  const activeViewLabel: Record<View, string> = {
+    metrics: "Metrics",
+    incidents: "Incidents",
+    memory: "Memory Search",
+    graph: "Graph",
+    workflows: "Workflows",
+    reasoning: "Reasoning"
+  };
+
   return (
-    <main className="min-h-screen bg-[#f4f7f9] text-graphite">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="grid h-11 w-11 place-items-center rounded bg-graphite text-white shadow-sm">
-              <Radar size={22} />
+    <main className="app-shell">
+      <div className="mx-auto flex max-w-[1440px] flex-col gap-5 px-4 py-5 lg:px-8 lg:py-8">
+        <header className="topbar-panel">
+          <div className="p-6 lg:p-7">
+            <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="hero-logo">
+                  <Radar size={26} />
+                </div>
+                <div>
+                  <p className="hero-kicker">Operations Intelligence Workspace</p>
+                  <h1 className="hero-title">AI-Memory Graph</h1>
+                  <p className="hero-subtitle">
+                    Telemetry analysis, memory retrieval, causality mapping, and explainable RCA in one clean incident workspace.
+                  </p>
+                </div>
+              </div>
+              <div className="flex w-full max-w-xl flex-col gap-3 xl:items-end">
+                <StatusPill label={status} />
+                <div className="flex flex-wrap gap-2 xl:justify-end">
+                  <ActionButton icon={<Gauge size={16} />} label="Open Metrics" onClick={() => setActiveView("metrics")} />
+                  <ActionButton icon={<Network size={16} />} label="Build Graph" onClick={buildCausalityGraph} />
+                  <ActionButton icon={<Play size={16} />} label="Start Workflow" onClick={startWorkflow} />
+                </div>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-semibold tracking-normal">AI MEMORY GRAPH - TELEMETRY ANALYSIS</h1>
-              <p className="text-sm text-slate-500">Autonomous Execution, Graph Intelligence and Stateful Runtime</p>
+
+            <div className="mt-6 grid gap-4 lg:grid-cols-[1.18fr_0.82fr]">
+              <div className="hero-context-card">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="max-w-2xl">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-600">Live incident</div>
+                    <div className="mt-2 text-[1.35rem] font-semibold tracking-[-0.03em] text-slate-900">{selectedIncident.summary}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                      <span className="font-mono text-[0.78rem] text-slate-600">{selectedIncident.incidentId}</span>
+                      <span className="text-slate-300">•</span>
+                      <span>{selectedIncident.service}</span>
+                      <span className="text-slate-300">•</span>
+                      <span>{selectedIncident.deploymentVersion}</span>
+                    </div>
+                  </div>
+                  <SeverityBadge severity={selectedIncident.severity} />
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <Detail label="Service" value={selectedIncident.service} />
+                  <Detail label="Deployment" value={selectedIncident.deploymentVersion} />
+                  <Detail label="Workspace" value={activeViewLabel[activeView]} />
+                  <Detail label="Updated" value={new Date(selectedIncident.timestamp).toLocaleString()} />
+                </div>
+              </div>
+
+              <div className="hero-context-card">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-600">Workspace focus</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="insight-card">
+                    <Database className="mt-0.5 text-sky-600" size={18} />
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Memory search</div>
+                      <div className="mt-1 text-sm leading-6 text-slate-500">{searchResults.length} ranked matches in the active incident context.</div>
+                    </div>
+                  </div>
+                  <div className="insight-card">
+                    <GitBranch className="mt-0.5 text-emerald-600" size={18} />
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Graph coverage</div>
+                      <div className="mt-1 text-sm leading-6 text-slate-500">{causalityGraph.nodes.length} nodes and {causalityGraph.edges.length} relationships available.</div>
+                    </div>
+                  </div>
+                  <div className="insight-card">
+                    <Sparkles className="mt-0.5 text-amber-600" size={18} />
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">RCA output</div>
+                      <div className="mt-1 text-sm leading-6 text-slate-500">{rca.likelyRootCause || "Run RCA to generate an explanation."}</div>
+                    </div>
+                  </div>
+                  <div className="insight-card">
+                    <BarChart3 className="mt-0.5 text-indigo-600" size={18} />
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Telemetry stream</div>
+                      <div className="mt-1 text-sm leading-6 text-slate-500">{metricSamples.length} collected samples across {services.length} active services.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusPill label={status} />
-            <ActionButton icon={<Gauge size={16} />} label="Collect Metrics" onClick={() => setActiveView("metrics")} />
-            <ActionButton icon={<Network size={16} />} label="Build Graph" onClick={buildCausalityGraph} />
-            <ActionButton icon={<Play size={16} />} label="Start Workflow" onClick={startWorkflow} />
+        </header>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {metrics.map((metric) => (
+            <Metric key={metric.label} {...metric} />
+          ))}
+        </section>
+
+        <section>
+          <div className="nav-rail">
+            <NavButton active={activeView === "metrics"} icon={<Gauge size={16} />} label="Metrics" onClick={() => setActiveView("metrics")} />
+            <NavButton active={activeView === "incidents"} icon={<Bell size={16} />} label="Incidents" onClick={() => setActiveView("incidents")} />
+            <NavButton active={activeView === "memory"} icon={<Database size={16} />} label="Memory Search" onClick={() => setActiveView("memory")} />
+            <NavButton active={activeView === "graph"} icon={<Network size={16} />} label="Graph" onClick={() => setActiveView("graph")} />
+            <NavButton active={activeView === "workflows"} icon={<Layers3 size={16} />} label="Workflows" onClick={() => setActiveView("workflows")} />
+            <NavButton active={activeView === "reasoning"} icon={<Bot size={16} />} label="Reasoning" onClick={() => setActiveView("reasoning")} />
           </div>
-        </div>
-      </header>
+        </section>
 
-      <section className="mx-auto grid max-w-7xl gap-4 px-5 py-5 md:grid-cols-4">
-        {metrics.map((metric) => (
-          <Metric key={metric.label} {...metric} />
-        ))}
-      </section>
-
-      <section className="mx-auto max-w-7xl px-5">
-        <div className="flex flex-wrap gap-2 border-b border-slate-200">
-          <NavButton active={activeView === "metrics"} icon={<Gauge size={16} />} label="Metrics" onClick={() => setActiveView("metrics")} />
-          <NavButton active={activeView === "incidents"} icon={<Bell size={16} />} label="Incidents" onClick={() => setActiveView("incidents")} />
-          <NavButton active={activeView === "memory"} icon={<Database size={16} />} label="Memory Search" onClick={() => setActiveView("memory")} />
-          <NavButton active={activeView === "graph"} icon={<Network size={16} />} label="Graph" onClick={() => setActiveView("graph")} />
-          <NavButton active={activeView === "workflows"} icon={<Layers3 size={16} />} label="Workflows" onClick={() => setActiveView("workflows")} />
-          <NavButton active={activeView === "reasoning"} icon={<Bot size={16} />} label="Reasoning" onClick={() => setActiveView("reasoning")} />
-        </div>
-      </section>
-
-      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="space-y-5">
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.22fr)_380px]">
+          <div className="space-y-6">
           {activeView === "metrics" && (
             <>
               <SyntheticDataPanel
@@ -822,21 +917,21 @@ function App() {
           )}
 
           {activeView === "incidents" && (
-            <Panel title="Detected Incidents" action={<ActionButton icon={<RefreshCw size={16} />} label="Run Search" onClick={runSearch} />}>
-              <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-[1fr_180px]">
+            <Panel title="Detected Incidents" action={<ActionButton icon={<RefreshCw size={16} />} label="Load Latest" onClick={loadSyntheticWorkflow} />}>
+              <div className="grid gap-3 border-b border-slate-100 p-5 md:grid-cols-[1fr_220px]">
                 <label className="relative block">
-                  <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+                  <Search className="absolute left-3 top-[13px] text-slate-400" size={18} />
                   <input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    className="h-11 w-full rounded border border-slate-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-signal focus:ring-2 focus:ring-emerald-100"
+                    className="ui-input pl-10 pr-3 text-sm"
                     placeholder="Search detected incidents"
                   />
                 </label>
                 <select
                   value={serviceFilter}
                   onChange={(event) => setServiceFilter(event.target.value)}
-                  className="h-11 rounded border border-slate-200 bg-white px-3 text-sm outline-none focus:border-signal focus:ring-2 focus:ring-emerald-100"
+                  className="ui-select text-sm"
                 >
                   <option value="all">All services</option>
                   {services.map((service) => (
@@ -844,7 +939,7 @@ function App() {
                   ))}
                 </select>
               </div>
-              <div className="divide-y divide-slate-100">
+              <div className="grid gap-3 p-5">
                 {visibleIncidents.map((incident) => (
                   <IncidentRow
                     key={incident.incidentId}
@@ -859,12 +954,12 @@ function App() {
 
           {activeView === "memory" && (
             <Panel title="Semantic Memory Retrieval" action={<ActionButton icon={<Search size={16} />} label="Run Retrieval" onClick={runSearch} />}>
-              <div className="p-4">
+              <div className="p-5">
                 <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                   <input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    className="h-11 rounded border border-slate-200 px-3 text-sm outline-none focus:border-signal focus:ring-2 focus:ring-emerald-100"
+                    className="ui-input text-sm"
                     placeholder="Redis latency after deployment"
                   />
                   <ActionButton icon={<Sparkles size={16} />} label="Correlate" onClick={runSearch} />
@@ -874,7 +969,7 @@ function App() {
                     <button
                       key={result.incidentId}
                       onClick={() => selectIncident(result)}
-                      className="rounded border border-slate-200 bg-white p-4 text-left transition hover:border-signal hover:shadow-sm"
+                      className="list-row p-4 text-left"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -882,7 +977,7 @@ function App() {
                           <div className="mt-1 text-sm font-semibold">{result.summary}</div>
                           <div className="mt-1 text-xs text-slate-500">{result.reason}</div>
                         </div>
-                        <div className="rounded bg-emerald-50 px-2 py-1 font-mono text-sm text-signal">{result.score.toFixed(2)}</div>
+                        <div className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 font-mono text-sm text-sky-700">{result.score.toFixed(2)}</div>
                       </div>
                     </button>
                   ))}
@@ -893,23 +988,23 @@ function App() {
 
           {activeView === "graph" && (
             <Panel title="Telemetry Causality Graph" action={<ActionButton icon={<GitBranch size={16} />} label="Build Graph" onClick={buildCausalityGraph} />}>
-              <div className="grid gap-4 p-4 lg:grid-cols-[1fr_240px]">
+              <div className="grid gap-4 p-5 lg:grid-cols-[1fr_280px]">
                 <D3CausalityGraph
                   graph={causalityGraph}
                   selectedId={selectedGraphNode.id}
                   onSelect={(node) => setSelectedGraphNode({ ...node, x: 0, y: 0 })}
                 />
-                <div className="rounded border border-slate-200 bg-slate-50 p-4">
+                <div className="ui-muted-surface p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{selectedGraphNode.kind}</div>
                   <div className="mt-2 text-lg font-semibold">{selectedGraphNode.label}</div>
                   <p className="mt-3 text-sm leading-6 text-slate-600">{selectedGraphNode.detail}</p>
                   <div className="mt-4 grid gap-2 text-xs text-slate-600">
-                    <div className="rounded bg-white px-3 py-2">Blast radius: {causalityGraph.blastRadius.join(", ") || "none"}</div>
-                    <div className="rounded bg-white px-3 py-2">Patterns: {causalityGraph.recurringPatterns.join(", ") || "none"}</div>
+                    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3">Blast radius: {causalityGraph.blastRadius.join(", ") || "none"}</div>
+                    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3">Patterns: {causalityGraph.recurringPatterns.join(", ") || "none"}</div>
                   </div>
                   <button
                     onClick={generateRca}
-                    className="mt-4 inline-flex h-10 items-center gap-2 rounded bg-graphite px-3 text-sm font-medium text-white transition hover:bg-slate-700"
+                    className="ui-action-button ui-action-button-primary mt-4"
                   >
                     <Sparkles size={16} />
                     Generate RCA
@@ -924,13 +1019,13 @@ function App() {
 
           {activeView === "workflows" && (
             <Panel title="Incident Investigation Workflow" action={<ActionButton icon={<Play size={16} />} label={workflowRunning ? "Running" : "Run Workflow"} onClick={startWorkflow} />}>
-              <div className="grid gap-3 p-4">
+              <div className="grid gap-3 p-5">
                 {workflowSteps.map((step, index) => (
                   <div key={step} className="flex items-center gap-3">
-                    <div className={`grid h-8 w-8 place-items-center rounded-full border ${index <= workflowIndex ? "border-signal bg-emerald-50 text-signal" : "border-slate-200 bg-white text-slate-400"}`}>
+                    <div className={`grid h-9 w-9 place-items-center rounded-full border ${index <= workflowIndex ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-400"}`}>
                       {index < workflowIndex ? <CheckCircle2 size={16} /> : index === workflowIndex && workflowRunning ? <Activity size={16} className="animate-spin" /> : index + 1}
                     </div>
-                    <div className="flex-1 rounded border border-slate-200 bg-white px-3 py-2 text-sm">{step}</div>
+                    <div className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">{step}</div>
                   </div>
                 ))}
               </div>
@@ -941,19 +1036,18 @@ function App() {
             <ReasoningReplayPanel
               replay={reasoningReplay}
               onReplay={() => {
-                const traceId = rca.traceId ?? reasoningReplay.traceId;
-                void loadReasoningReplay(traceId);
+                void openReasoningReplay();
               }}
             />
           )}
         </div>
 
         <div className="space-y-5">
-          <Panel
-            title="Investigation Context"
-            action={<ActionButton icon={<Send size={16} />} label="RCA" onClick={generateRca} />}
-          >
-            <div className="space-y-4 p-4">
+            <Panel
+              title="Investigation Context"
+              action={<ActionButton icon={<Send size={16} />} label="RCA" onClick={generateRca} />}
+            >
+            <div className="space-y-4 p-5">
               <div>
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -962,14 +1056,14 @@ function App() {
                   </div>
                   <SeverityBadge severity={selectedIncident.severity} />
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-slate-600">
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm text-slate-600">
                   <Detail label="Service" value={selectedIncident.service} />
                   <Detail label="Version" value={selectedIncident.deploymentVersion} />
                 </div>
               </div>
               <div className="grid gap-2">
                 {Object.entries(selectedIncident.telemetry).map(([key, value]) => (
-                  <div key={key} className="flex items-center justify-between rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                  <div key={key} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
                     <span className="text-slate-500">{key}</span>
                     <span className="font-mono font-semibold">{String(value)}</span>
                   </div>
@@ -980,30 +1074,31 @@ function App() {
                 <ActionButton icon={<Network size={16} />} label="Causality Graph" onClick={buildCausalityGraph} />
                 <ActionButton icon={<CheckCircle2 size={16} />} label="Acknowledge" onClick={acknowledgeIncident} />
                 <ActionButton icon={<Play size={16} />} label="Workflow" onClick={startWorkflow} />
-                <ActionButton icon={<Bot size={16} />} label="Trace Replay" onClick={() => setActiveView("reasoning")} />
+                <ActionButton icon={<Bot size={16} />} label="Trace Replay" onClick={() => void openReasoningReplay()} />
               </div>
             </div>
           </Panel>
 
-          <RcaChatPanel
-            busy={chatBusy}
-            input={chatInput}
+            <RcaChatPanel
+              busy={chatBusy}
+              input={chatInput}
             incident={selectedIncident}
             messages={chatMessages}
             onAsk={askRcaAssistant}
             onInputChange={setChatInput}
-          />
-        </div>
-      </section>
+            />
+          </div>
+        </section>
+      </div>
     </main>
   );
 }
 
 function Panel(props: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="rounded border border-slate-200 bg-white shadow-sm">
-      <div className="flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-        <h2 className="text-base font-semibold">{props.title}</h2>
+    <section className="ui-panel">
+      <div className="ui-panel-header">
+        <h2 className="text-[0.98rem] font-semibold tracking-[-0.02em] text-slate-900">{props.title}</h2>
         {props.action}
       </div>
       {props.children}
@@ -1013,15 +1108,15 @@ function Panel(props: { title: string; action?: React.ReactNode; children: React
 
 function Metric(props: { icon: React.ReactNode; label: string; value: string; tone: string }) {
   const tones: Record<string, string> = {
-    teal: "border-emerald-200 bg-emerald-50 text-signal",
-    red: "border-red-200 bg-red-50 text-fault",
-    blue: "border-sky-200 bg-sky-50 text-sky-700",
-    amber: "border-amber-200 bg-amber-50 text-amber-700"
+    teal: "metric-icon-teal",
+    red: "metric-icon-red",
+    blue: "metric-icon-blue",
+    amber: "metric-icon-amber"
   };
   return (
-    <div className="rounded border border-slate-200 bg-white p-4 shadow-sm">
-      <div className={`inline-flex h-9 w-9 items-center justify-center rounded border ${tones[props.tone]}`}>{props.icon}</div>
-      <div className="mt-4 text-2xl font-semibold">{props.value}</div>
+    <div className="metric-card">
+      <div className={`metric-icon ${tones[props.tone]}`}>{props.icon}</div>
+      <div className="mt-5 text-[2rem] font-semibold tracking-[-0.04em] text-slate-900">{props.value}</div>
       <div className="mt-1 text-sm text-slate-500">{props.label}</div>
     </div>
   );
@@ -1032,7 +1127,7 @@ function ActionButton(props: { icon: React.ReactNode; label: string; onClick: ()
     <button
       type="button"
       onClick={props.onClick}
-      className="inline-flex h-10 items-center gap-2 rounded border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-signal hover:bg-emerald-50 hover:text-signal active:scale-[0.99]"
+      className="ui-action-button"
     >
       {props.icon}
       {props.label}
@@ -1045,9 +1140,7 @@ function NavButton(props: { active: boolean; icon: React.ReactNode; label: strin
     <button
       type="button"
       onClick={props.onClick}
-      className={`inline-flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium transition ${
-        props.active ? "border-signal text-signal" : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800"
-      }`}
+      className={`ui-tab ${props.active ? "ui-tab-active" : ""}`}
     >
       {props.icon}
       {props.label}
@@ -1060,9 +1153,7 @@ function IncidentRow(props: { incident: Incident; active: boolean; onSelect: () 
     <button
       type="button"
       onClick={props.onSelect}
-      className={`grid w-full gap-3 px-4 py-4 text-left transition md:grid-cols-[110px_1fr_120px_110px] ${
-        props.active ? "bg-emerald-50" : "bg-white hover:bg-slate-50"
-      }`}
+      className={`list-row grid gap-3 px-4 py-4 text-left md:grid-cols-[120px_1fr_120px_120px] ${props.active ? "list-row-active" : ""}`}
     >
       <div className="font-mono text-sm text-slate-600">{props.incident.incidentId}</div>
       <div>
@@ -1080,14 +1171,14 @@ function SeverityBadge(props: { severity: Severity }) {
     LOW: "border-slate-200 bg-slate-50 text-slate-600",
     MEDIUM: "border-amber-200 bg-amber-50 text-amber-700",
     HIGH: "border-red-200 bg-red-50 text-red-700",
-    CRITICAL: "border-fault bg-red-600 text-white"
+    CRITICAL: "border-red-600 bg-red-600 text-white"
   };
-  return <span className={`inline-flex h-7 items-center justify-center rounded border px-2 text-xs font-semibold ${classes[props.severity]}`}>{props.severity}</span>;
+  return <span className={`inline-flex h-8 items-center justify-center rounded-full border px-3 text-xs font-semibold tracking-[0.08em] ${classes[props.severity]}`}>{props.severity}</span>;
 }
 
 function StatusPill(props: { label: string; compact?: boolean }) {
   return (
-    <div className={`inline-flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 text-sm text-emerald-800 ${props.compact ? "px-2 py-1" : "px-3 py-2"}`}>
+    <div className={`ui-status-pill ${props.compact ? "ui-status-pill-compact" : ""}`}>
       <Activity size={14} />
       <span className="truncate">{props.label}</span>
     </div>
@@ -1096,9 +1187,9 @@ function StatusPill(props: { label: string; compact?: boolean }) {
 
 function Detail(props: { label: string; value: string }) {
   return (
-    <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-      <div className="text-xs text-slate-500">{props.label}</div>
-      <div className="mt-1 truncate font-medium">{props.value}</div>
+    <div className="detail-card">
+      <div className="text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-slate-400">{props.label}</div>
+      <div className="mt-1 truncate text-sm font-medium text-slate-900">{props.value}</div>
     </div>
   );
 }
@@ -1118,29 +1209,29 @@ function RcaChatPanel(props: {
   ];
   return (
     <Panel title="RCA Chat" action={<StatusPill label={props.busy ? "Reasoning" : props.incident.incidentId} compact />}>
-      <div className="space-y-3 p-4">
-        <div className="max-h-80 space-y-3 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-3">
+      <div className="space-y-4 p-5">
+        <div className="chat-scroll space-y-3">
           {props.messages.map((message) => (
             <div
               key={message.id}
               className={`flex gap-2 ${message.role === "operator" ? "justify-end" : "justify-start"}`}
             >
               {message.role === "aegis" && (
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded bg-graphite text-white">
+                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-sky-600 text-white shadow-sm">
                   <Bot size={16} />
                 </div>
               )}
               <div
                 className={`max-w-[82%] rounded px-3 py-2 text-sm leading-6 ${
                   message.role === "operator"
-                    ? "bg-signal text-white"
-                    : "border border-slate-200 bg-white text-slate-700"
+                    ? "bg-sky-600 text-white shadow-sm"
+                    : "border border-slate-200 bg-white text-slate-700 shadow-sm"
                 }`}
               >
                 {message.content}
               </div>
               {message.role === "operator" && (
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded border border-slate-200 bg-white text-slate-600">
+                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm">
                   <UserRound size={16} />
                 </div>
               )}
@@ -1159,7 +1250,7 @@ function RcaChatPanel(props: {
               key={suggestion}
               type="button"
               onClick={() => props.onAsk(undefined, suggestion)}
-              className="rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 transition hover:border-signal hover:text-signal"
+              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-sky-200 hover:text-sky-700"
             >
               {suggestion}
             </button>
@@ -1169,12 +1260,12 @@ function RcaChatPanel(props: {
           <input
             value={props.input}
             onChange={(event) => props.onInputChange(event.target.value)}
-            className="h-10 rounded border border-slate-200 px-3 text-sm outline-none focus:border-signal focus:ring-2 focus:ring-emerald-100"
+            className="ui-input text-sm"
             placeholder="Ask about root cause, evidence, blast radius, or remediation"
           />
           <button
             disabled={props.busy}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded bg-graphite px-4 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="ui-action-button ui-action-button-primary disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Send size={16} />
             Ask
@@ -1202,7 +1293,7 @@ function MetricCollectorPanel(props: {
 }) {
   return (
     <Panel title="Metrics Collection" action={<StatusPill label="Telemetry first" compact />}>
-      <form onSubmit={props.onCollect} className="grid gap-3 border-b border-slate-100 p-4">
+      <form onSubmit={props.onCollect} className="grid gap-4 border-b border-slate-100 p-5">
         <div className="grid gap-3 md:grid-cols-2">
           <Input label="Service" value={props.collector.service} onChange={(value) => props.setCollector((collector) => ({ ...collector, service: value }))} />
           <Input label="Collector Source" value={props.collector.source} onChange={(value) => props.setCollector((collector) => ({ ...collector, source: value }))} />
@@ -1210,16 +1301,16 @@ function MetricCollectorPanel(props: {
         <Input label="Metric Payload" value={props.collector.metrics} onChange={(value) => props.setCollector((collector) => ({ ...collector, metrics: value }))} />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm text-slate-500">
-            <ShieldCheck size={16} className="text-signal" />
+            <ShieldCheck size={16} className="text-sky-600" />
             Thresholds open incidents only when collected metrics are unhealthy.
           </div>
-          <button className="inline-flex h-10 items-center gap-2 rounded bg-graphite px-4 text-sm font-medium text-white transition hover:bg-slate-700">
+          <button className="ui-action-button ui-action-button-primary">
             <Gauge size={16} />
             Collect Metrics
           </button>
         </div>
       </form>
-      <div className="grid gap-3 p-4">
+      <div className="grid gap-3 p-5">
         {props.metricSamples.map((sample) => (
           <MetricSampleRow key={sample.id} sample={sample} onOpenIncident={() => props.onOpenIncident(sample)} />
         ))}
@@ -1235,7 +1326,7 @@ function MetricSampleRow(props: { sample: MetricSample; onOpenIncident: () => vo
     Critical: "border-red-200 bg-red-50 text-red-800"
   }[props.sample.health];
   return (
-    <div className="rounded border border-slate-200 bg-white p-4">
+    <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="font-mono text-xs text-slate-500">{props.sample.id}</div>
@@ -1246,7 +1337,7 @@ function MetricSampleRow(props: { sample: MetricSample; onOpenIncident: () => vo
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-3">
         {Object.entries(props.sample.values).map(([key, value]) => (
-          <div key={key} className="rounded bg-slate-50 px-3 py-2">
+          <div key={key} className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3">
             <div className="text-xs text-slate-500">{key}</div>
             <div className="mt-1 font-mono text-sm font-semibold">{String(value)}</div>
           </div>
@@ -1256,7 +1347,7 @@ function MetricSampleRow(props: { sample: MetricSample; onOpenIncident: () => vo
         <button
           type="button"
           onClick={props.onOpenIncident}
-          className="mt-3 inline-flex h-9 items-center gap-2 rounded border border-red-200 bg-red-50 px-3 text-sm font-medium text-red-700 transition hover:bg-red-100"
+          className="mt-3 inline-flex h-10 items-center gap-2 rounded-full border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 transition hover:bg-red-100"
         >
           <AlertTriangle size={16} />
           Open Incident From Metrics
@@ -1271,8 +1362,8 @@ function SyntheticDataPanel(props: {
   report: SyntheticDatasetReport | null;
 }) {
   return (
-    <Panel title="Synthetic Data Source">
-      <div className="grid gap-3 p-4">
+    <Panel title="Synthetic Data Source" action={<StatusPill label={props.payload?.profile ?? "Awaiting profile"} compact />}>
+      <div className="grid gap-3 p-5 md:grid-cols-2">
         <Detail label="Current incident" value={props.payload?.incidentId ?? "not loaded"} />
         <Detail label="Service" value={props.payload?.incident.service ?? "not loaded"} />
         <Detail label="Profile" value={props.payload?.profile ?? "not loaded"} />
@@ -1288,12 +1379,12 @@ function SyntheticDataPanel(props: {
 
 function Input(props: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <label className="grid gap-1 text-sm">
-      <span className="text-slate-500">{props.label}</span>
+    <label className="grid gap-2 text-sm">
+      <span className="text-[0.78rem] font-semibold uppercase tracking-[0.12em] text-slate-400">{props.label}</span>
       <input
         value={props.value}
         onChange={(event) => props.onChange(event.target.value)}
-        className="h-10 rounded border border-slate-200 px-3 outline-none focus:border-signal focus:ring-2 focus:ring-emerald-100"
+        className="ui-input"
       />
     </label>
   );
@@ -1304,6 +1395,10 @@ function D3CausalityGraph(props: {
   selectedId: string;
   onSelect: (node: Omit<GraphNode, "x" | "y">) => void;
 }) {
+  const GRAPH_WIDTH = 760;
+  const GRAPH_HEIGHT = 460;
+  const GRAPH_PADDING = 74;
+
   const layout = useMemo(() => {
     type LayoutNode = Omit<GraphNode, "x" | "y"> & d3.SimulationNodeDatum & { x: number; y: number };
     type LayoutLink = Omit<CausalityEdge, "source" | "target"> &
@@ -1311,10 +1406,13 @@ function D3CausalityGraph(props: {
         source: string | LayoutNode;
         target: string | LayoutNode;
       };
+    const columns = Math.min(3, Math.max(2, Math.ceil(Math.sqrt(props.graph.nodes.length || 1))));
+    const columnGap = columns > 1 ? (GRAPH_WIDTH - GRAPH_PADDING * 2) / (columns - 1) : 0;
+    const rowGap = 152;
     const nodes = props.graph.nodes.map((node, index) => ({
       ...node,
-      x: 120 + (index % 3) * 160,
-      y: 90 + Math.floor(index / 3) * 100
+      x: GRAPH_PADDING + (index % columns) * columnGap,
+      y: 112 + Math.floor(index / columns) * rowGap
     })) satisfies LayoutNode[];
     const links = props.graph.edges.map((edge) => ({ ...edge })) satisfies LayoutLink[];
     const simulation = d3
@@ -1323,34 +1421,56 @@ function D3CausalityGraph(props: {
         "link",
         d3.forceLink<LayoutNode, LayoutLink>(links)
           .id((node) => node.id)
-          .distance(118)
+          .distance(168)
           .strength((edge) => Math.max(0.35, edge.weight))
       )
-      .force("charge", d3.forceManyBody().strength(-420))
-      .force("center", d3.forceCenter(260, 180))
-      .force("collision", d3.forceCollide(46))
+      .force("charge", d3.forceManyBody().strength(-960))
+      .force("center", d3.forceCenter(GRAPH_WIDTH / 2, GRAPH_HEIGHT / 2 - 12))
+      .force("collision", d3.forceCollide(78))
+      .force("x", d3.forceX(GRAPH_WIDTH / 2).strength(0.025))
+      .force("y", d3.forceY(GRAPH_HEIGHT / 2 - 8).strength(0.05))
       .stop();
-    for (let index = 0; index < 160; index += 1) {
+    for (let index = 0; index < 220; index += 1) {
       simulation.tick();
     }
-    return { nodes, links };
+    const boundedNodes = nodes.map((node) => ({
+      ...node,
+      x: Math.min(GRAPH_WIDTH - GRAPH_PADDING, Math.max(GRAPH_PADDING, node.x)),
+      y: Math.min(GRAPH_HEIGHT - GRAPH_PADDING - 34, Math.max(GRAPH_PADDING, node.y))
+    }));
+    return { nodes: boundedNodes, links };
   }, [props.graph]);
 
   const nodeById = new Map(layout.nodes.map((node) => [node.id, node]));
 
   return (
-    <svg viewBox="0 0 520 360" className="min-h-[320px] w-full rounded border border-slate-200 bg-white">
+    <svg viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`} className="min-h-[360px] w-full rounded-[24px] border border-slate-200 bg-[radial-gradient(circle_at_top,#ffffff,#eef5ff_70%)] shadow-sm">
+      <defs>
+        <filter id="graph-node-shadow" x="-20%" y="-20%" width="140%" height="160%">
+          <feDropShadow dx="0" dy="10" stdDeviation="12" floodColor="#cbd5e1" floodOpacity="0.34" />
+        </filter>
+      </defs>
       <defs>
         <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
-          <path d="M0,0 L0,6 L8,3 z" fill="#64748b" />
+          <path d="M0,0 L0,6 L8,3 z" fill="#94a3b8" />
         </marker>
       </defs>
+      <rect x="18" y="18" width={GRAPH_WIDTH - 36} height={GRAPH_HEIGHT - 36} rx="26" fill="none" stroke="#e2e8f0" strokeDasharray="6 10" />
       {layout.links.map((edge) => {
         const source = typeof edge.source === "string" ? nodeById.get(edge.source) : edge.source;
         const target = typeof edge.target === "string" ? nodeById.get(edge.target) : edge.target;
         if (!source || !target) {
           return null;
         }
+        const midX = (source.x + target.x) / 2;
+        const midY = (source.y + target.y) / 2;
+        const deltaX = target.x - source.x;
+        const deltaY = target.y - source.y;
+        const length = Math.max(1, Math.hypot(deltaX, deltaY));
+        const offsetX = (-deltaY / length) * 18;
+        const offsetY = (deltaX / length) * 18;
+        const edgeLabel = formatGraphLabel(edge.relationship);
+        const edgeLabelWidth = edgeLabel.length * 7.1 + 20;
         return (
           <g key={`${source.id}-${target.id}-${edge.relationship}`}>
             <line
@@ -1358,12 +1478,27 @@ function D3CausalityGraph(props: {
               y1={source.y}
               x2={target.x}
               y2={target.y}
-              stroke="#94a3b8"
-              strokeWidth={Math.max(1.5, edge.weight * 3)}
+              stroke="#9fb2cf"
+              strokeWidth={Math.max(2, edge.weight * 3.2)}
+              strokeLinecap="round"
               markerEnd="url(#arrow)"
             />
-            <text x={(source.x + target.x) / 2} y={(source.y + target.y) / 2 - 6} textAnchor="middle" className="fill-slate-500 text-[10px] font-medium">
-              {edge.relationship}
+            <rect
+              x={midX + offsetX - edgeLabelWidth / 2}
+              y={midY + offsetY - 11}
+              width={edgeLabelWidth}
+              height={22}
+              rx="11"
+              fill="#ffffff"
+              stroke="#dbe6f5"
+            />
+            <text
+              x={midX + offsetX}
+              y={midY + offsetY + 4}
+              textAnchor="middle"
+              className="fill-slate-500 text-[10px] font-semibold tracking-[0.12em]"
+            >
+              {edgeLabel}
             </text>
           </g>
         );
@@ -1393,9 +1528,9 @@ function ReasoningReplayPanel(props: { replay: ReasoningReplay; onReplay: () => 
 
   return (
     <Panel title="AI Reasoning Trace Replay" action={<ActionButton icon={<Play size={16} />} label="Replay" onClick={props.onReplay} />}>
-      <div className="grid gap-4 p-4">
-        <div className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{props.replay.summary}</div>
-        <svg viewBox="0 0 520 250" className="min-h-[230px] w-full rounded border border-slate-200 bg-white">
+      <div className="grid gap-4 p-5">
+        <div className="ui-muted-surface p-4 text-sm text-slate-700">{props.replay.summary}</div>
+        <svg viewBox="0 0 520 250" className="min-h-[230px] w-full rounded-[24px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff,#f8fbff)]">
           {points.slice(1).map((point, index) => {
             const previous = points[index];
             return (
@@ -1413,7 +1548,7 @@ function ReasoningReplayPanel(props: { replay: ReasoningReplay; onReplay: () => 
           })}
           {points.map((point, index) => (
             <g key={point.event.eventId}>
-              <circle cx={point.x} cy={point.y} r="28" fill={index === points.length - 1 ? "#0f766e" : "#334155"} />
+              <circle cx={point.x} cy={point.y} r="28" fill={index === points.length - 1 ? "#1a73e8" : "#334155"} />
               <text x={point.x} y={point.y + 4} textAnchor="middle" className="fill-white text-[12px] font-semibold">
                 {index + 1}
               </text>
@@ -1425,10 +1560,10 @@ function ReasoningReplayPanel(props: { replay: ReasoningReplay; onReplay: () => 
         </svg>
         <div className="grid gap-2">
           {props.replay.events.map((event) => (
-            <div key={event.eventId} className="rounded border border-slate-200 bg-white p-3">
+            <div key={event.eventId} className="rounded-[20px] border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="font-mono text-xs text-slate-500">{event.eventId}</div>
-                <div className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{event.durationMs}ms</div>
+                <div className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{event.durationMs}ms</div>
               </div>
               <div className="mt-1 text-sm font-semibold">{event.step.replace(/_/g, " ")}</div>
               <p className="mt-1 text-sm leading-6 text-slate-600">{event.detail}</p>
@@ -1446,23 +1581,92 @@ function GraphEdge(props: { x1: number; y1: number; x2: number; y2: number }) {
 
 function GraphNodeView(props: { node: GraphNode; selected: boolean; onSelect: () => void }) {
   const fill = {
-    deploy: "#0f766e",
-    deployment: "#0f766e",
-    metric: "#eab308",
-    fault: "#dc2626",
-    incident: "#475569",
-    service: "#2563eb",
-    signal: "#9333ea"
+    deploy: "#1aa260",
+    deployment: "#1aa260",
+    metric: "#f9ab00",
+    fault: "#ea4335",
+    incident: "#5f6368",
+    service: "#1a73e8",
+    signal: "#4285f4"
   }[props.node.kind];
+  const lines = splitGraphLabel(props.node.label);
+  const labelWidth = Math.max(...lines.map((line) => line.length), 8) * 7.2 + 28;
+  const labelHeight = lines.length * 17 + 22;
+  const chipLabel = formatGraphLabel(props.node.kind);
+  const chipWidth = chipLabel.length * 6.4 + 20;
+
   return (
     <g onClick={props.onSelect} className="cursor-pointer">
-      <circle cx={props.node.x} cy={props.node.y} r={props.selected ? 40 : 34} fill={fill} opacity={props.selected ? 1 : 0.9} />
-      <circle cx={props.node.x} cy={props.node.y} r={props.selected ? 48 : 0} fill="none" stroke="#0f766e" strokeWidth="2" />
-      <text x={props.node.x} y={props.node.y + 58} textAnchor="middle" className="fill-slate-700 text-[13px] font-medium">
-        {props.node.label}
+      <rect
+        x={props.node.x - labelWidth / 2}
+        y={props.node.y + 46}
+        width={labelWidth}
+        height={labelHeight}
+        rx="18"
+        fill="rgba(255,255,255,0.96)"
+        stroke={props.selected ? "#93c5fd" : "#dbe6f5"}
+      />
+      <rect
+        x={props.node.x - chipWidth / 2}
+        y={props.node.y - 58}
+        width={chipWidth}
+        height={22}
+        rx="11"
+        fill={props.selected ? "#dbeafe" : "#f8fafc"}
+        stroke={props.selected ? "#93c5fd" : "#dbe6f5"}
+      />
+      <text x={props.node.x} y={props.node.y - 43} textAnchor="middle" className="fill-slate-500 text-[10px] font-semibold tracking-[0.14em]">
+        {chipLabel}
       </text>
+      <circle cx={props.node.x} cy={props.node.y} r={props.selected ? 40 : 34} fill={fill} opacity={props.selected ? 1 : 0.94} filter="url(#graph-node-shadow)" />
+      <circle cx={props.node.x} cy={props.node.y} r={props.selected ? 49 : 42} fill="none" stroke={props.selected ? "#1a73e8" : "#bfdbfe"} strokeWidth={props.selected ? "2.5" : "1.5"} />
+      {lines.map((line, index) => (
+        <text
+          key={`${props.node.id}-${line}`}
+          x={props.node.x}
+          y={props.node.y + 68 + index * 17}
+          textAnchor="middle"
+          className="fill-slate-700 text-[12px] font-semibold"
+        >
+          {line}
+        </text>
+      ))}
     </g>
   );
+}
+
+function splitGraphLabel(value: string): string[] {
+  const normalized = value.replace(/_/g, " ").trim();
+  if (normalized.length <= 18) {
+    return [normalized];
+  }
+  const words = normalized.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= 18 || !current) {
+      current = candidate;
+      continue;
+    }
+    lines.push(current);
+    current = word;
+    if (lines.length === 1) {
+      continue;
+    }
+    break;
+  }
+  if (current) {
+    lines.push(current);
+  }
+  const trimmed = lines.slice(0, 2).map((line, index, arr) =>
+    index === arr.length - 1 && line.length > 18 ? `${line.slice(0, 15).trimEnd()}...` : line
+  );
+  return trimmed.length ? trimmed : [normalized.slice(0, 15).trimEnd() + "..."];
+}
+
+function formatGraphLabel(value: string): string {
+  return value.replace(/_/g, " ").toUpperCase();
 }
 
 function mapSyntheticPayloadIncident(payload: SyntheticIncidentPayload): Incident {
@@ -1506,6 +1710,31 @@ function mapRemoteMemory(memory: RemoteMemory): SearchResult {
     status: "RCA ready",
     score,
     reason: `Vector ${(memory.similarityScore ?? score).toFixed(2)} | ${memory.memoryType} | ${Object.keys(memory.rankingSignals ?? {}).slice(0, 3).join(", ")}`
+  };
+}
+
+function normalizeBranding(value: string): string {
+  return value.replace(/\bAEGIS\b/g, "AI-Memory Graph").replace(/\bAegis\b/g, "AI-Memory Graph");
+}
+
+function normalizeRcaResult(result: RcaResult): RcaResult {
+  return {
+    ...result,
+    summary: normalizeBranding(result.summary),
+    likelyRootCause: normalizeBranding(result.likelyRootCause),
+    evidence: result.evidence.map(normalizeBranding),
+    remediation: result.remediation.map(normalizeBranding)
+  };
+}
+
+function normalizeReasoningReplay(replay: ReasoningReplay): ReasoningReplay {
+  return {
+    ...replay,
+    summary: normalizeBranding(replay.summary),
+    events: replay.events.map((event) => ({
+      ...event,
+      detail: normalizeBranding(event.detail)
+    }))
   };
 }
 
